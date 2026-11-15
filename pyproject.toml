@@ -1,0 +1,26 @@
+[project]
+name = "wattbot-simple"
+version = "0.1.0"
+description = "Add your description here"
+authors = [
+    { name = "DeianHsu", email = "663781679@qq.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "docling>=2.145.0",
+    "langchain-chroma>=1.1.0",
+    "langchain-classic>=1.0.8",
+    "langchain-community>=0.4.2",
+    "langchain-huggingface>=1.2.3",
+    "langchain-openai>=1.7.3",
+    "python-dotenv>=1.2.4",
+    "rank-bm25>=0.2.2",
+    "sentence-transformers>=6.2.0",
+]
+
+[project.scripts]
+wattbot-simple = "wattbot_simple.main:main"
+
+[build-system]
+requires = ["uv_build>=0.12.24,<0.13.0"]
+build-backend = "uv_build"

@@ -1,0 +1,15 @@
+.venv/
+.env
+papers/
+/input/
+/reports/
+__pycache__/
+
+*.pyc
+.idea/
+artifacts/
+chroma_db/
+submission*.csv
+submission*.json
+*_cost.json
+*_cost.json.tmp
