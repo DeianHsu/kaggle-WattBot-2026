@@ -49,24 +49,41 @@ def chunk_pdf_document(pdf_path, pdf_document, document_path, chunker, parsed_pa
         chunk_overlap=0,
     )
 
-    # 图片优先使用图题，缺少图题时使用内部文字；每个分块保留原图片引用。
-    docling_chunks.extend(
-        DocChunk(
-            text=picture_text_chunk,
-            meta=DocMeta(doc_items=[picture]),
-        )
-        for picture in pdf_document.pictures
-
-        for picture_text_chunk in text_splitter.split_text(
-            picture.caption_text(pdf_document).strip() or "\n".join(
-                picture_item.text
-                for picture_item, _ in pdf_document.iterate_items(
-                    root=picture, traverse_pictures=True
-                )
-                if isinstance(picture_item, TextItem)
+    # 有图题或内部文字的图片，仍按原来的方式分块。
+    pictures_without_text = {}
+    for picture in pdf_document.pictures:
+        picture_text = picture.caption_text(pdf_document).strip() or "\n".join(
+            item.text
+            for item, _ in pdf_document.iterate_items(
+                root=picture, traverse_pictures=True
             )
+            if isinstance(item, TextItem)
+        ).strip()
+
+        if not picture_text:
+            page_no = picture.prov[0].page_no
+            pictures_without_text.setdefault(page_no, []).append(picture)
+            continue
+
+        docling_chunks.extend(
+            DocChunk(text=text, meta=DocMeta(doc_items=[picture]))
+            for text in text_splitter.split_text(picture_text)
         )
-    )
+
+    # 无文字图片按页分组，用同页正文帮助检索，回答时仍查看原图。
+    for page_no, pictures in pictures_without_text.items():
+        page_text = "\n".join(
+            item.text
+            for item, _ in pdf_document.iterate_items(page_no=page_no)
+            if isinstance(item, TextItem)
+        )
+        docling_chunks.extend(
+            DocChunk(
+                text="同页文字，仅用于定位图片；图中内容请核对原图。\n" + text,
+                meta=DocMeta(doc_items=pictures),
+            )
+            for text in text_splitter.split_text(page_text)
+        )
     # 提取匹配前的 PDF 文字，补充表格解析时可能遗漏的检索关键词。
     for table in pdf_document.tables:
         table_prov = table.prov[0]

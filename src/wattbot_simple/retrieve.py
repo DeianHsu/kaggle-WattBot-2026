@@ -12,15 +12,15 @@ def create_hybrid_retriever(chroma_store):
     if not chunk_ids:
         raise ValueError("索引为空，请先完成建库")
     chunks = chroma_store.get_by_ids(chunk_ids)
-    # 按问题与文本的语义相似度召回四个候选块。
+    # 按问题与文本的语义相似度召回十二个候选块。
     vector_retriever = chroma_store.as_retriever(
         search_type="similarity",
-        search_kwargs={"k": 4},
+        search_kwargs={"k": 12},
     )
-    # 将文字统一为小写词项，再按关键词相关性召回四个候选块。
+    # 将文字统一为小写词项，再按关键词相关性召回十二个候选块。
     bm25_retriever = BM25Retriever.from_documents(
         documents=chunks,
-        k=4,
+        k=12,
         preprocess_func=lambda text: re.findall(r"\w+", text.lower()),
     )
     # 合并两路候选排名，并按文本块标识去重。
@@ -31,17 +31,17 @@ def create_hybrid_retriever(chroma_store):
     )
 
 
-# 对混合召回的候选重新评分，选出三条最终证据。
+# 对混合召回的候选重新评分，选出八条最终证据。
 def create_evidence_retriever(chroma_store):
     # 先获取向量和关键词两路检索的候选集合。
     hybrid_retriever = create_hybrid_retriever(chroma_store)
-    # 用交叉编码器比较问题与每条候选，保留得分最高的三条。
+    # 用交叉编码器比较问题与每条候选，保留得分最高的八条。
     rerank_model = HuggingFaceCrossEncoder(
         model_name="BAAI/bge-reranker-base",
     )
     reranker = CrossEncoderReranker(
         model=rerank_model,
-        top_n=3,
+        top_n=8,
     )
 
     # 把召回和重排接成一个可直接调用的检索器。

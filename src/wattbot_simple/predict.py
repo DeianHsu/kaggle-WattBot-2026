@@ -3,7 +3,8 @@ import csv
 import json
 from pathlib import Path
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.exceptions import OutputParserException
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.messages.content import create_text_block
 
 from wattbot_simple.cost import record_cost
@@ -19,15 +20,19 @@ COLUMNS = (
     "ref_id", "ref_url", "supporting_materials", "explanation",
 )
 SYSTEM_PROMPT = """只根据给定证据回答，并输出 JSON。
-answer_value 是可评分的字符串。数值按题目指定单位换算，字段里只写数值。
-术语保留原文。判断题用 "1" 表示真、"0" 表示假。
-citations 填实际支持答案的证据标签。supporting_materials 填原文摘录或图表定位。
+answer_value 只写直接答案，不写解释。
+数值以输入的 answer_unit 为准；问题正文使用其他单位时，换算成指定单位。
+按指定单位的数量级输出：原文为 2 million kWh，指定单位为 kWh 时写 "2000000"，为 million kWh 时写 "2"。
+数值不附带单位，不使用千分位逗号或 million 等文字。
+术语使用原文中最短且完整的名称，保留必要的修饰词和连接词，不为多个术语强制添加括号。
+判断题用 "1" 表示真、"0" 表示假。
+多个数值按题目要求的顺序、范围按下限到上限，写成 "(0.5,1.65)" 这样的字符串，不输出 JSON 数组。
+citations 只填本次提供且实际支持答案的证据标签。
+可回答时，citations 至少包含一个标签，supporting_materials 填原文摘录或图表定位。
 explanation 简要说明证据如何支持答案。
 证据不足时，将 answer_value 设为 "is_blank"，citations 设为空列表，
 在 answer 和 explanation 中简要说明缺少什么证据。
 除 citations 为字符串列表外，其余输出字段均为字符串。
-多个数值或范围上下限写成 "(1.65,0.5)"，多个术语写成 "(GPT-4,Claude-3.5)"。
-上述括号表达式也是字符串，不要输出 JSON 数组或用 and 连接。
 answer_unit 为 "is_blank" 只表示没有指定单位，不表示无法回答。
 
 JSON 示例
@@ -49,19 +54,64 @@ def predict_question(question, retriever, llm, paper_urls):
     question_block = create_text_block(
         f"问题\n{question['question']}\n\n指定单位\n{question['answer_unit']}"
     )
-    # 使用比赛提示词生成答案值、佐证材料和引用标签。
-    result = llm.invoke([
+    # 首次生成失败时，将具体输出错误反馈给模型，只纠正一次。
+    messages = [
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content_blocks=[question_block, *blocks]),
-    ])
+    ]
+    for attempt in range(2):
+        try:
+            result = llm.invoke(messages)
+            raw = json.dumps(result, ensure_ascii=False)
+            if not isinstance(result, dict):
+                raise OutputParserException("输出必须是 JSON 对象", llm_output=raw)
 
-    # 清理字段首尾空白，拒绝缺少答案、答案值或解释的结果。
-    answer = result["answer"].strip()
-    value = result["answer_value"].strip()
-    explanation = result["explanation"].strip()
-    if not all((answer, value, explanation)):
-        raise ValueError("模型返回了空的答案、答案值或解释")
+            for field in ("answer", "answer_value", "supporting_materials", "explanation"):
+                if field not in result or not isinstance(result[field], str):
+                    raise OutputParserException(
+                        f"{field} 缺失或不是字符串", llm_output=raw
+                    )
+                result[field] = result[field].strip()
 
+            if "citations" not in result or not isinstance(result["citations"], list):
+                raise OutputParserException(
+                    "citations 必须是字符串列表", llm_output=raw
+                )
+            if any(
+                not isinstance(label, str) or label not in citation_map
+                for label in result["citations"]
+            ):
+                raise OutputParserException(
+                    "citations 含有无效的证据标签", llm_output=raw
+                )
+            if not all(result[field] for field in ("answer", "answer_value", "explanation")):
+                raise OutputParserException(
+                    "答案、答案值和解释不能为空", llm_output=raw
+                )
+            if result["answer_value"] != "is_blank" and (
+                not result["citations"] or not result["supporting_materials"]
+            ):
+                raise OutputParserException(
+                    "可回答的题目需要引用和佐证材料", llm_output=raw
+                )
+            break
+        except OutputParserException as exc:
+            if attempt == 1:
+                raise
+            messages.extend([
+                AIMessage(content=exc.llm_output or "上次未返回可解析的 JSON。"),
+                HumanMessage(content=(
+                    f"上次输出不符合要求：{exc}\n"
+                    f"可用证据标签：{', '.join(citation_map)}。\n"
+                    "请结合原问题和证据，重新输出完整 JSON。"
+                    "仅引用实际支持答案的证据；证据不足时按要求返回 is_blank。"
+                )),
+            ])
+
+    answer = result["answer"]
+    value = result["answer_value"]
+    explanation = result["explanation"]
+    supporting_materials = result["supporting_materials"]
     if value == "is_blank":
         # 无法回答时，用比赛规定的缺失标记统一填写证据字段。
         ref_id = ref_url = supporting_materials = "is_blank"
@@ -71,9 +121,6 @@ def predict_question(question, retriever, llm, paper_urls):
             Path(citation_map[label]["source"]).stem
             for label in result["citations"]
         ))
-        supporting_materials = result["supporting_materials"].strip()
-        if not paper_ids or not supporting_materials:
-            raise ValueError("可回答的题目需要引用和佐证材料")
         ref_id = json.dumps(paper_ids)
         ref_url = json.dumps([paper_urls[paper_id] for paper_id in paper_ids])
 
