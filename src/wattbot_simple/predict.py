@@ -152,7 +152,7 @@ def parse_args():
 
 
 # 按题库顺序逐题预测并保存结果，重启时从已保存的位置继续。
-def predict(questions_path, output_path, ids=None, store=None, thinking="none"):
+def predict(questions_path, output_path, ids=None, chroma_store=None, thinking="none"):
     # 读取题库，并按指定题号选择本次处理范围。
     with questions_path.open(encoding="utf-8-sig", newline="") as file:
         questions = list(csv.DictReader(file))
@@ -198,9 +198,9 @@ def predict(questions_path, output_path, ids=None, store=None, thinking="none"):
         paper_urls = {row["id"]: row["url"] for row in csv.DictReader(file)}
 
     # 准备本轮共用的检索器和模型；未传入索引时打开本地索引。
-    if store is None:
-        store = open_chroma_store()
-    retriever = create_evidence_retriever(store)
+    if chroma_store is None:
+        chroma_store = open_chroma_store()
+    retriever = create_evidence_retriever(chroma_store)
     llm = get_llm(thinking=thinking).with_structured_output(method="json_mode")
 
     # 成本单独保存，沿用提交文件名，续跑时继续累计已有账目。

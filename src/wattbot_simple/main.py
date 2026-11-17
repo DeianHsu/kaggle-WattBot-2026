@@ -8,7 +8,7 @@ def main():
     chroma_store = build_chroma_index(PAPERS_DIR)
     predict(
         args.questions, args.output, ids=args.ids,
-        store=chroma_store, thinking=args.thinking,
+        chroma_store=chroma_store, thinking=args.thinking,
     )
 
 
