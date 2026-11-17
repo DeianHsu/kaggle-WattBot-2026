@@ -57,18 +57,18 @@ def record_cost(cost_path, question_id):
                 input_tokens = usage["input_tokens"]
                 output_tokens = usage["output_tokens"]
                 # 回调的 cache_read 对应接口返回的命中数，剩余输入即未命中数。
-                cache_hit_tokens = usage["input_token_details"]["cache_read"]
-                cache_miss_tokens = input_tokens - cache_hit_tokens
+                hit_tokens = usage["input_token_details"]["cache_read"]
+                miss_tokens = input_tokens - hit_tokens
                 record.update({
                     "model": model,
                     "input_tokens": input_tokens,
-                    "cache_hit_tokens": cache_hit_tokens,
-                    "cache_miss_tokens": cache_miss_tokens,
+                    "cache_hit_tokens": hit_tokens,
+                    "cache_miss_tokens": miss_tokens,
                     "output_tokens": output_tokens,
                     "total_tokens": usage["total_tokens"],
                     "cost_cny": round((
-                        cache_hit_tokens * CACHE_HIT_PRICE
-                        + cache_miss_tokens * CACHE_MISS_PRICE
+                        hit_tokens * CACHE_HIT_PRICE
+                        + miss_tokens * CACHE_MISS_PRICE
                         + output_tokens * OUTPUT_PRICE
                     ) / 1_000_000, 8),
                 })

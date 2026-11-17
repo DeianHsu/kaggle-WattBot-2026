@@ -62,37 +62,37 @@ def predict_question(question, retriever, llm, paper_urls):
     for attempt in range(2):
         try:
             result = llm.invoke(messages)
-            raw = json.dumps(result, ensure_ascii=False)
+            result_json = json.dumps(result, ensure_ascii=False)
             if not isinstance(result, dict):
-                raise OutputParserException("输出必须是 JSON 对象", llm_output=raw)
+                raise OutputParserException("输出必须是 JSON 对象", llm_output=result_json)
 
             for field in ("answer", "answer_value", "supporting_materials", "explanation"):
                 if field not in result or not isinstance(result[field], str):
                     raise OutputParserException(
-                        f"{field} 缺失或不是字符串", llm_output=raw
+                        f"{field} 缺失或不是字符串", llm_output=result_json
                     )
                 result[field] = result[field].strip()
 
             if "citations" not in result or not isinstance(result["citations"], list):
                 raise OutputParserException(
-                    "citations 必须是字符串列表", llm_output=raw
+                    "citations 必须是字符串列表", llm_output=result_json
                 )
             if any(
                 not isinstance(label, str) or label not in citation_map
                 for label in result["citations"]
             ):
                 raise OutputParserException(
-                    "citations 含有无效的证据标签", llm_output=raw
+                    "citations 含有无效的证据标签", llm_output=result_json
                 )
             if not all(result[field] for field in ("answer", "answer_value", "explanation")):
                 raise OutputParserException(
-                    "答案、答案值和解释不能为空", llm_output=raw
+                    "答案、答案值和解释不能为空", llm_output=result_json
                 )
             if result["answer_value"] != "is_blank" and (
                 not result["citations"] or not result["supporting_materials"]
             ):
                 raise OutputParserException(
-                    "可回答的题目需要引用和佐证材料", llm_output=raw
+                    "可回答的题目需要引用和佐证材料", llm_output=result_json
                 )
             break
         except OutputParserException as exc:

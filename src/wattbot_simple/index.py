@@ -33,7 +33,7 @@ def build_chroma_index(papers_dir):
     converter, chunker = create_converter_and_chunker()
     chroma_store = open_chroma_store()
 
-    for number, pdf_path in enumerate(pdf_paths, start=1):
+    for paper_no, pdf_path in enumerate(pdf_paths, start=1):
         pdf_stem = pdf_path.stem
 
         # 已有分块的论文直接跳过，避免重复解析和写入。
@@ -52,8 +52,8 @@ def build_chroma_index(papers_dir):
             raise ValueError(f"{pdf_path.name} 未生成可用的检索块")
 
         # 为每个块设置唯一标识，并把解析元数据转成可存储的字符串。
-        for num, chunk in enumerate(chunks):
-            chunk_id = f"{pdf_stem}_{num}"
+        for chunk_no, chunk in enumerate(chunks):
+            chunk_id = f"{pdf_stem}_{chunk_no}"
             chunk.metadata.update(
                 chunk_id=chunk_id,
                 pdf_stem=pdf_stem,
@@ -69,7 +69,7 @@ def build_chroma_index(papers_dir):
             ids=[chunk.metadata["chunk_id"] for chunk in chunks],
         )
 
-        print(f"[{number}/{len(pdf_paths)}] 已完成 {pdf_path.name}", flush=True)
+        print(f"[{paper_no}/{len(pdf_paths)}] 已完成 {pdf_path.name}", flush=True)
 
     return chroma_store
 
