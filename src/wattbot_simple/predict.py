@@ -10,7 +10,7 @@ from langchain_core.messages.content import create_text_block
 from wattbot_simple.cost import record_cost
 from wattbot_simple.generate import build_evidence_blocks
 from wattbot_simple.index import open_chroma_store
-from wattbot_simple.model import get_llm
+from wattbot_simple.model import create_llm
 from wattbot_simple.retrieve import create_evidence_retriever
 
 
@@ -46,54 +46,60 @@ JSON 示例
 """
 
 
+# 校验模型输出并去除字符串首尾空白，保留错误输出供模型纠正。
+def normalize_prediction_result(result, citation_map):
+    result_json = json.dumps(result, ensure_ascii=False)
+    if not isinstance(result, dict):
+        raise OutputParserException("输出必须是 JSON 对象", llm_output=result_json)
+
+    for field in ("answer", "answer_value", "supporting_materials", "explanation"):
+        if field not in result or not isinstance(result[field], str):
+            raise OutputParserException(
+                f"{field} 缺失或不是字符串", llm_output=result_json
+            )
+        result[field] = result[field].strip()
+
+    if "citations" not in result or not isinstance(result["citations"], list):
+        raise OutputParserException(
+            "citations 必须是字符串列表", llm_output=result_json
+        )
+    if any(
+        not isinstance(label, str) or label not in citation_map
+        for label in result["citations"]
+    ):
+        raise OutputParserException(
+            "citations 含有无效的证据标签", llm_output=result_json
+        )
+    if not all(result[field] for field in ("answer", "answer_value", "explanation")):
+        raise OutputParserException(
+            "答案、答案值和解释不能为空", llm_output=result_json
+        )
+    if result["answer_value"] != "is_blank" and (
+        not result["citations"] or not result["supporting_materials"]
+    ):
+        raise OutputParserException(
+            "可回答的题目需要引用和佐证材料", llm_output=result_json
+        )
+    return result
+
+
 # 完成一道比赛题的检索与回答，并整理成提交文件的一行。
 def predict_question(question, retriever, llm, paper_urls):
     # 检索相关证据，并把题目指定单位一起传给模型。
     evidence = retriever.invoke(question["question"])
-    blocks, citation_map = build_evidence_blocks(evidence)
+    evidence_blocks, citation_map = build_evidence_blocks(evidence)
     question_block = create_text_block(
         f"问题\n{question['question']}\n\n指定单位\n{question['answer_unit']}"
     )
     # 首次生成失败时，将具体输出错误反馈给模型，只纠正一次。
     messages = [
         SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content_blocks=[question_block, *blocks]),
+        HumanMessage(content_blocks=[question_block, *evidence_blocks]),
     ]
     for attempt in range(2):
         try:
             result = llm.invoke(messages)
-            result_json = json.dumps(result, ensure_ascii=False)
-            if not isinstance(result, dict):
-                raise OutputParserException("输出必须是 JSON 对象", llm_output=result_json)
-
-            for field in ("answer", "answer_value", "supporting_materials", "explanation"):
-                if field not in result or not isinstance(result[field], str):
-                    raise OutputParserException(
-                        f"{field} 缺失或不是字符串", llm_output=result_json
-                    )
-                result[field] = result[field].strip()
-
-            if "citations" not in result or not isinstance(result["citations"], list):
-                raise OutputParserException(
-                    "citations 必须是字符串列表", llm_output=result_json
-                )
-            if any(
-                not isinstance(label, str) or label not in citation_map
-                for label in result["citations"]
-            ):
-                raise OutputParserException(
-                    "citations 含有无效的证据标签", llm_output=result_json
-                )
-            if not all(result[field] for field in ("answer", "answer_value", "explanation")):
-                raise OutputParserException(
-                    "答案、答案值和解释不能为空", llm_output=result_json
-                )
-            if result["answer_value"] != "is_blank" and (
-                not result["citations"] or not result["supporting_materials"]
-            ):
-                raise OutputParserException(
-                    "可回答的题目需要引用和佐证材料", llm_output=result_json
-                )
+            result = normalize_prediction_result(result, citation_map)
             break
         except OutputParserException as exc:
             if attempt == 1:
@@ -151,18 +157,8 @@ def parse_args():
     return parser.parse_args()
 
 
-# 按题库顺序逐题预测并保存结果，重启时从已保存的位置继续。
-def predict(questions_path, output_path, ids=None, chroma_store=None, thinking="none"):
-    # 读取题库，并按指定题号选择本次处理范围。
-    with questions_path.open(encoding="utf-8-sig", newline="") as file:
-        questions = list(csv.DictReader(file))
-    if ids:
-        questions_by_id = {question["id"]: question for question in questions}
-        questions = [questions_by_id[question_id] for question_id in ids]
-    if not questions or len({q["id"] for q in questions}) != len(questions):
-        raise ValueError("题库至少要有一道题，题号不能重复")
-
-    # 先确认已有记录写入完整，再统计可跳过的题号。
+# 读取已有预测文件，确认记录完整后返回按保存顺序排列的题号。
+def read_completed_ids(output_path):
     done_ids = []
     if output_path.exists() and output_path.stat().st_size > 0:
         with output_path.open(encoding="utf-8-sig", newline="") as file:
@@ -180,6 +176,22 @@ def predict(questions_path, output_path, ids=None, chroma_store=None, thinking="
             ):
                 raise ValueError(f"已有输出第 {number} 条记录字段不完整，请检查后重试")
             done_ids.append(row["id"])
+    return done_ids
+
+
+# 按题库顺序逐题预测并保存结果，重启时从已保存的位置继续。
+def predict(questions_path, output_path, ids=None, chroma_store=None, thinking="none"):
+    # 读取题库，并按指定题号选择本次处理范围。
+    with questions_path.open(encoding="utf-8-sig", newline="") as file:
+        questions = list(csv.DictReader(file))
+    if ids:
+        questions_by_id = {question["id"]: question for question in questions}
+        questions = [questions_by_id[question_id] for question_id in ids]
+    if not questions or len({q["id"] for q in questions}) != len(questions):
+        raise ValueError("题库至少要有一道题，题号不能重复")
+
+    # 先确认已有记录写入完整，再统计可跳过的题号。
+    done_ids = read_completed_ids(output_path)
 
     # 完整记录必须对应本次题目顺序的连续前缀。
     if done_ids != [q["id"] for q in questions[:len(done_ids)]]:
@@ -201,7 +213,7 @@ def predict(questions_path, output_path, ids=None, chroma_store=None, thinking="
     if chroma_store is None:
         chroma_store = open_chroma_store()
     retriever = create_evidence_retriever(chroma_store)
-    llm = get_llm(thinking=thinking).with_structured_output(method="json_mode")
+    llm = create_llm(thinking=thinking).with_structured_output(method="json_mode")
 
     # 成本单独保存，沿用提交文件名，续跑时继续累计已有账目。
     cost_path = output_path.with_name(f"{output_path.stem}_cost.json")

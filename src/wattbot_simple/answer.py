@@ -2,7 +2,7 @@ from pathlib import Path
 from wattbot_simple.cost import record_cost
 from wattbot_simple.generate import generate_answer
 from wattbot_simple.index import open_chroma_store
-from wattbot_simple.model import get_llm
+from wattbot_simple.model import create_llm
 from wattbot_simple.retrieve import create_evidence_retriever
 
 
@@ -15,7 +15,7 @@ def answer_question(question, retriever):
     with record_cost(ROOT_DIR / "answer_cost.json", question):
         # 先取回相关证据，再交给回答流程组织图文请求。
         evidence = retriever.invoke(question)
-        llm = get_llm()
+        llm = create_llm()
         answer_result = generate_answer(question, evidence, llm)
     return answer_result
 

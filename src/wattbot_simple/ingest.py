@@ -66,8 +66,8 @@ def chunk_pdf_document(pdf_path, pdf_document, document_path, chunker, parsed_pa
             continue
 
         docling_chunks.extend(
-            DocChunk(text=text, meta=DocMeta(doc_items=[picture]))
-            for text in text_splitter.split_text(picture_text)
+            DocChunk(text=picture_text_chunk, meta=DocMeta(doc_items=[picture]))
+            for picture_text_chunk in text_splitter.split_text(picture_text)
         )
 
     # 无文字图片按页分组，用同页正文帮助检索，回答时仍查看原图。
@@ -79,10 +79,10 @@ def chunk_pdf_document(pdf_path, pdf_document, document_path, chunker, parsed_pa
         )
         docling_chunks.extend(
             DocChunk(
-                text="同页文字，仅用于定位图片；图中内容请核对原图。\n" + text,
+                text="同页文字，仅用于定位图片；图中内容请核对原图。\n" + page_text_chunk,
                 meta=DocMeta(doc_items=pictures),
             )
-            for text in text_splitter.split_text(page_text)
+            for page_text_chunk in text_splitter.split_text(page_text)
         )
     # 提取匹配前的 PDF 文字，补充表格解析时可能遗漏的检索关键词。
     for table in pdf_document.tables:
