@@ -1,10 +1,10 @@
 import json
-from base64 import b64encode
 from pathlib import Path
 from docling_core.types import DoclingDocument
 from docling_core.types.doc import RefItem
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.messages.content import create_text_block, create_image_block
+from langchain_core.messages.content import create_text_block
+from wattbot_simple.model import load_image_block
 
 SYSTEM_PROMPT = (
     "只根据给定证据，用中文简洁回答问题。"
@@ -24,12 +24,15 @@ def build_evidence_blocks(evidence):
         # 为当前证据分配引用标签，并把正文和论文标识一起交给模型。
         label = f"Evidence_{num}"
         metadata = chunk.metadata
+        text = chunk.page_content
+        if "picture_description_model" in metadata:
+            text = "模型生成的图片描述，用于定位。涉及图中事实时请核对随后原图。\n" + text
 
         evidence_blocks.append(
             create_text_block(
                 f"[{label}]\n"
                 f"论文标识：{Path(metadata['source']).stem}\n"
-                f"{chunk.page_content}"
+                f"{text}"
             )
         )
 
@@ -69,10 +72,7 @@ def build_evidence_blocks(evidence):
             # 图表共用图片读取与编码逻辑，让模型直接查看原图。
             image_path = Path(metadata["document_path"]).parent / str(element.image.uri)
             evidence_blocks.append(
-                create_image_block(
-                    base64=b64encode(image_path.read_bytes()).decode("ascii"),
-                    mime_type="image/png",
-                )
+                load_image_block(image_path, element.image.mimetype)
             )
     return evidence_blocks, citation_map
 

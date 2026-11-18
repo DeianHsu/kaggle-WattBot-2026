@@ -11,6 +11,10 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
 
+def parsed_document_path(pdf_path):
+    return ROOT_DIR / "artifacts" / pdf_path.stem / "document.json"
+
+
 # 创建 PDF 转换器和分块器，供多篇论文共用。
 def create_converter_and_chunker():
     # 保留 PDF 原始文字，并生成图片和裁剪表格需要的页面图像。
@@ -126,9 +130,9 @@ def ingest_pdf(pdf_path, converter, chunker):
     parsed_pages = {page.page_no: page.parsed_page for page in pdf_result.pages}
 
     # 将结构化文档和图片保存到论文对应目录，供问答时回查完整证据。
-    output_dir = ROOT_DIR / "artifacts" / pdf_path.stem
+    document_path = parsed_document_path(pdf_path)
+    output_dir = document_path.parent
     output_dir.mkdir(parents=True, exist_ok=True)
-    document_path = output_dir / "document.json"
 
     # 保存原表截图，并将相对路径写入表格元素，供回答时读取。
     for num, table in enumerate(pdf_document.tables):

@@ -77,7 +77,27 @@ DEEPSEEK_API_KEY=填写密钥
 .\.venv\Scripts\python.exe -m wattbot_simple.predict .\input\test_Q.csv .\submission_debug.csv --ids q002 q005
 ```
 
-比赛提交须覆盖全部 317 题。`wattbot_simple.main` 可串联补齐索引与预测，参数与 `predict` 相同。
+比赛提交须覆盖全部 317 题。`wattbot_simple.main` 可先补齐索引，再按 `predict` 的参数执行预测。
+
+### 用图片描述补充索引
+
+`--describe-pictures` 调用视觉语言模型（VLM）为每张图生成英文描述，和正文、图题一起供向量和关键词检索使用。命中描述后，系统会把对应原图交给问答模型，并记录论文页码。
+
+在 `.env` 中配置支持图像输入的 OpenAI 兼容接口。`VLM_BASE_URL` 填接口根地址，服务需要认证时填写 `VLM_API_KEY`。
+
+```dotenv
+VLM_BASE_URL=http://127.0.0.1:8000/v1
+VLM_MODEL=填写视觉模型名称
+# VLM_API_KEY=填写接口密钥
+```
+
+以 `wpf2026` 为例，运行下面的命令补录图片描述。
+
+```powershell
+.\.venv\Scripts\python.exe -m wattbot_simple.index --describe-pictures --paper wpf2026
+```
+
+省略 `--paper` 会处理 `papers/` 中的全部论文。补录复用 `artifacts/` 中的解析文档和原图，逐图写入现有索引。重跑会跳过已写入的图片描述。`wattbot_simple.main` 也支持 `--describe-pictures`，会在预测前完成补录。
 
 ## 成本口径
 
