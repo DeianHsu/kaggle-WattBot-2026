@@ -224,17 +224,15 @@ def predict(questions_path, output_path, ids=None, chroma_store=None, thinking="
         if file.tell() == 0:
             writer.writeheader()
 
-        # 每题失败时带上题号向上传递异常，立即停止本轮预测。
         for number, question in enumerate(questions[start:], start + 1):
-            try:
-                with record_cost(cost_path, question["id"]):
-                    prediction = predict_question(question, retriever, llm, paper_urls)
+            question_id = question["id"]
+            print(f"正在处理题目 {question_id}", flush=True)
+            with record_cost(cost_path, question_id):
+                prediction = predict_question(question, retriever, llm, paper_urls)
 
-                # 成本保存成功后再写提交记录，避免续跑跳过尚未记录成本的题目。
-                writer.writerow(prediction)
-                file.flush()
-            except Exception as exc:
-                raise RuntimeError(f"题目 {question['id']} 处理失败") from exc
+            # 成本保存成功后再写提交记录，避免续跑跳过尚未记录成本的题目。
+            writer.writerow(prediction)
+            file.flush()
 
             print(f"已保存 {number}/{len(questions)}", flush=True)
 
