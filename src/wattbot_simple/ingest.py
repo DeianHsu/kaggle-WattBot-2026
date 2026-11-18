@@ -7,12 +7,9 @@ from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTok
 from docling_core.types.doc import ImageRef, ImageRefMode, TextCellUnit, TextItem
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from wattbot_simple.model import describe_image, load_image_block
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-
-
-def parsed_document_path(pdf_path):
-    return ROOT_DIR / "artifacts" / pdf_path.stem / "document.json"
 
 
 # 创建 PDF 转换器和分块器，供多篇论文共用。
@@ -42,7 +39,7 @@ def create_converter_and_chunker():
 
 
 # 将解析文档转成检索块，并保留来源、原始元素和解析文件位置。
-def chunk_pdf_document(pdf_path, pdf_document, document_path, chunker, parsed_pages):
+def chunk_pdf_document(pdf_path, pdf_document, document_path, chunker, parsed_pages, vlm):
     # 由分块器处理正文和表格，保留后续回查原文所需的元素标识。
     docling_chunks = list(chunker.chunk(pdf_document))
 
@@ -54,7 +51,6 @@ def chunk_pdf_document(pdf_path, pdf_document, document_path, chunker, parsed_pa
     )
 
     # 有图题或内部文字的图片，仍按原来的方式分块。
-    pictures_without_text = {}
     for picture in pdf_document.pictures:
         picture_text = picture.caption_text(pdf_document).strip() or "\n".join(
             item.text
@@ -64,30 +60,11 @@ def chunk_pdf_document(pdf_path, pdf_document, document_path, chunker, parsed_pa
             if isinstance(item, TextItem)
         ).strip()
 
-        if not picture_text:
-            page_no = picture.prov[0].page_no
-            pictures_without_text.setdefault(page_no, []).append(picture)
-            continue
-
         docling_chunks.extend(
             DocChunk(text=picture_text_chunk, meta=DocMeta(doc_items=[picture]))
             for picture_text_chunk in text_splitter.split_text(picture_text)
         )
 
-    # 无文字图片按页分组，用同页正文帮助检索，回答时仍查看原图。
-    for page_no, pictures in pictures_without_text.items():
-        page_text = "\n".join(
-            item.text
-            for item, _ in pdf_document.iterate_items(page_no=page_no)
-            if isinstance(item, TextItem)
-        )
-        docling_chunks.extend(
-            DocChunk(
-                text="同页文字，仅用于定位图片；图中内容请核对原图。\n" + page_text_chunk,
-                meta=DocMeta(doc_items=pictures),
-            )
-            for page_text_chunk in text_splitter.split_text(page_text)
-        )
     # 提取匹配前的 PDF 文字，补充表格解析时可能遗漏的检索关键词。
     for table in pdf_document.tables:
         table_prov = table.prov[0]
@@ -106,6 +83,14 @@ def chunk_pdf_document(pdf_path, pdf_document, document_path, chunker, parsed_pa
             for table_text_chunk in text_splitter.split_text(table_text)
         )
 
+    # 每条描述只引用一张原图或表格截图，命中时沿用该元素的原图和页码。
+    for item in [*pdf_document.pictures, *pdf_document.tables]:
+        image_block = load_image_block(item.image, document_path.parent)
+        description = describe_image(vlm, image_block)
+        if not description:
+            raise ValueError(f"{pdf_path.name} 的图表 {item.self_ref} 未生成描述")
+        docling_chunks.append(DocChunk(text=description, meta=DocMeta(doc_items=[item])))
+
     # 过滤没有文字的块，再转换成检索和建库使用的文档对象。
     chunks = [
         Document(
@@ -123,16 +108,16 @@ def chunk_pdf_document(pdf_path, pdf_document, document_path, chunker, parsed_pa
 
 
 # 解析一篇 PDF，保存原始解析产物并返回检索块。
-def ingest_pdf(pdf_path, converter, chunker):
+def ingest_pdf(pdf_path, converter, chunker, vlm):
     # 同时保留解析文档和原始页面文字，供表格文字补充使用。
     pdf_result = converter.convert(pdf_path)
     pdf_document = pdf_result.document
     parsed_pages = {page.page_no: page.parsed_page for page in pdf_result.pages}
 
     # 将结构化文档和图片保存到论文对应目录，供问答时回查完整证据。
-    document_path = parsed_document_path(pdf_path)
-    output_dir = document_path.parent
+    output_dir = ROOT_DIR / "artifacts" / pdf_path.stem
     output_dir.mkdir(parents=True, exist_ok=True)
+    document_path = output_dir / "document.json"
 
     # 保存原表截图，并将相对路径写入表格元素，供回答时读取。
     for num, table in enumerate(pdf_document.tables):
@@ -159,5 +144,5 @@ def ingest_pdf(pdf_path, converter, chunker):
     )
 
     # 使用刚解析的文档生成检索块，避免重复解析 PDF。
-    chunks = chunk_pdf_document(pdf_path, pdf_document, document_path, chunker, parsed_pages)
+    chunks = chunk_pdf_document(pdf_path, pdf_document, document_path, chunker, parsed_pages, vlm)
     return chunks

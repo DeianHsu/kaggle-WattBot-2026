@@ -49,13 +49,13 @@ DEEPSEEK_API_KEY=填写密钥
 
 以下命令在项目根目录的 PowerShell 中执行。
 
-建立索引：
+建库会解析正文、图片和表格，保存原图和表格截图，并用 `deepseek-flash` 生成图表描述。描述与正文一并写入索引，命中描述后可取回对应原图。
 
 ```powershell
 .\.venv\Scripts\python.exe -m wattbot_simple.index
 ```
 
-全量重建前删除 `chroma_db/` 和 `artifacts/`；已有分块的论文会被跳过。调整提示词、检索参数或思考强度无需重建索引。
+已有分块的论文会被跳过。要为已有论文生成图表描述，先将 `chroma_db/` 和 `artifacts/` 移到备份位置，再运行同一建库命令。调整答题提示词、检索参数或思考强度时可继续使用现有索引。
 
 使用已有索引预测，默认关闭思考：
 
@@ -78,26 +78,6 @@ DEEPSEEK_API_KEY=填写密钥
 ```
 
 比赛提交须覆盖全部 317 题。`wattbot_simple.main` 可先补齐索引，再按 `predict` 的参数执行预测。
-
-### 用图片描述补充索引
-
-`--describe-pictures` 调用视觉语言模型（VLM）为每张图生成英文描述，和正文、图题一起供向量和关键词检索使用。命中描述后，系统会把对应原图交给问答模型，并记录论文页码。
-
-在 `.env` 中配置支持图像输入的 OpenAI 兼容接口。`VLM_BASE_URL` 填接口根地址，服务需要认证时填写 `VLM_API_KEY`。
-
-```dotenv
-VLM_BASE_URL=http://127.0.0.1:8000/v1
-VLM_MODEL=填写视觉模型名称
-# VLM_API_KEY=填写接口密钥
-```
-
-以 `wpf2026` 为例，运行下面的命令补录图片描述。
-
-```powershell
-.\.venv\Scripts\python.exe -m wattbot_simple.index --describe-pictures --paper wpf2026
-```
-
-省略 `--paper` 会处理 `papers/` 中的全部论文。补录复用 `artifacts/` 中的解析文档和原图，逐图写入现有索引。重跑会跳过已写入的图片描述。`wattbot_simple.main` 也支持 `--describe-pictures`，会在预测前完成补录。
 
 ## 成本口径
 

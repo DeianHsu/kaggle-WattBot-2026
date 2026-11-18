@@ -145,7 +145,7 @@ def predict_question(question, retriever, llm, paper_urls):
 
 
 # 读取题库路径、输出路径、指定题号和思考强度。
-def parse_args(*, include_index_options=False):
+def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("questions", type=Path)
     parser.add_argument("output", type=Path)
@@ -154,10 +154,6 @@ def parse_args(*, include_index_options=False):
         "--thinking", choices=("none", "low", "high", "max"), default="none",
         help="思考强度，默认 none 关闭思考，max 开启最高强度",
     )
-    if include_index_options:
-        parser.add_argument(
-            "--describe-pictures", action="store_true", help="将视觉语言模型生成的图片描述写入索引",
-        )
     return parser.parse_args()
 
 

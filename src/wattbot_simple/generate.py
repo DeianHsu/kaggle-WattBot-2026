@@ -24,9 +24,11 @@ def build_evidence_blocks(evidence):
         # 为当前证据分配引用标签，并把正文和论文标识一起交给模型。
         label = f"Evidence_{num}"
         metadata = chunk.metadata
+        items = json.loads(metadata["dl_meta"])["doc_items"]
+        visual_items = [item for item in items if item["label"] in {"table", "picture"}]
         text = chunk.page_content
-        if "picture_description_model" in metadata:
-            text = "模型生成的图片描述，用于定位。涉及图中事实时请核对随后原图。\n" + text
+        if visual_items:
+            text = "请结合随附原图核对图表信息。\n" + text
 
         evidence_blocks.append(
             create_text_block(
@@ -37,7 +39,6 @@ def build_evidence_blocks(evidence):
         )
 
         # 从原始元素收集页码，记录标签对应的真实来源。
-        items = json.loads(metadata["dl_meta"])["doc_items"]
         pages = sorted({
             prov["page_no"]
             for item in items
@@ -49,16 +50,12 @@ def build_evidence_blocks(evidence):
             "pages": pages,
         }
 
-        # 找出块中关联的表格和图片；纯文字块无需加载完整解析文档。
-        visual_items = [
-            item for item in items
-            if item["label"] in {"table", "picture"}
-        ]
         if not visual_items:
             continue
 
         # 按原始元素标识取回完整图表，补充检索文字没有包含的内容。
-        pdf_document = DoclingDocument.load_from_json(metadata["document_path"])
+        document_path = Path(metadata["document_path"])
+        pdf_document = DoclingDocument.load_from_json(document_path)
         for item in visual_items:
             element = RefItem(cref=item["self_ref"]).resolve(pdf_document)
             if item["label"] == "table":
@@ -70,10 +67,7 @@ def build_evidence_blocks(evidence):
                     )
                 )
             # 图表共用图片读取与编码逻辑，让模型直接查看原图。
-            image_path = Path(metadata["document_path"]).parent / str(element.image.uri)
-            evidence_blocks.append(
-                load_image_block(image_path, element.image.mimetype)
-            )
+            evidence_blocks.append(load_image_block(element.image, document_path.parent))
     return evidence_blocks, citation_map
 
 
