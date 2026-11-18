@@ -15,12 +15,12 @@ def create_hybrid_retriever(chroma_store):
     # 按问题与文本的语义相似度召回十二个候选块。
     vector_retriever = chroma_store.as_retriever(
         search_type="similarity",
-        search_kwargs={"k": 12},
+        search_kwargs={"k": 30},
     )
     # 将文字统一为小写词项，再按关键词相关性召回十二个候选块。
     bm25_retriever = BM25Retriever.from_documents(
         documents=chunks,
-        k=12,
+        k=30,
         preprocess_func=lambda text: re.findall(r"\w+", text.lower()),
     )
     # 合并两路候选排名，并按文本块标识去重。
@@ -41,7 +41,7 @@ def create_evidence_retriever(chroma_store):
     )
     reranker = CrossEncoderReranker(
         model=rerank_model,
-        top_n=8,
+        top_n=20,
     )
 
     # 把召回和重排接成一个可直接调用的检索器。
