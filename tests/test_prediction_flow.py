@@ -102,6 +102,32 @@ class PredictionFlowTest(unittest.TestCase):
         )
         draft_answer.assert_called_once_with(chunks)
 
+    def test_retrieves_all_missing_fact_queries(self):
+        question = "Compare four measurements"
+        queries = [f"Measurement {paper}" for paper in "abcd"]
+        follow_up = [f"{query} annual report" for query in queries[1:]]
+        chunks = [_chunk(paper) for paper in "abcd"]
+        self.retriever.invoke.side_effect = [
+            [chunks[0]], [chunks[0]], [], [], [],
+            *([chunk] for chunk in chunks[1:]),
+        ]
+        llm = Mock()
+        llm.invoke.return_value = {"queries": queries}
+        draft_answer = Mock(side_effect=[
+            ({"missing_queries": follow_up}, {}),
+            ({}, {}),
+        ])
+
+        generate_with_retrieval(question, self.retriever, llm, draft_answer)
+
+        self.assertEqual(
+            self.retriever.invoke.call_args_list,
+            [call(query) for query in [question, *queries, *follow_up]],
+        )
+        self.assertEqual(
+            draft_answer.call_args_list, [call(chunks[:1]), call(chunks)],
+        )
+
     def test_follow_up_citations_and_all_model_usage_are_saved(self):
         self.retriever.invoke.side_effect = [
             [_chunk("a")], [_chunk("a")], [_chunk("b")],
