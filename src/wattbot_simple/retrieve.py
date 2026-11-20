@@ -1,8 +1,13 @@
 import re
+from itertools import zip_longest
+
 from langchain_classic.retrievers.document_compressors import CrossEncoderReranker
 from langchain_community.cross_encoders import HuggingFaceCrossEncoder
 from langchain_classic.retrievers import EnsembleRetriever, ContextualCompressionRetriever
 from langchain_community.retrievers import BM25Retriever
+
+
+EVIDENCE_LIMIT = 20
 
 
 # 组合语义检索和关键词检索，用同一批文本块提供候选证据。
@@ -41,7 +46,7 @@ def create_evidence_retriever(chroma_store):
     )
     reranker = CrossEncoderReranker(
         model=rerank_model,
-        top_n=20,
+        top_n=EVIDENCE_LIMIT,
     )
 
     # 把召回和重排接成一个可直接调用的检索器。
@@ -50,3 +55,16 @@ def create_evidence_retriever(chroma_store):
         base_compressor=reranker,
     )
     return evidence_retriever
+
+
+def retrieve_queries(retriever, queries, previous=()):
+    results = [retriever.invoke(query) for query in queries]
+    # 按查询轮流取证据，给排名靠前的不同事实各留位置。
+    evidence = {}
+    for group in zip_longest(previous, *results):
+        for chunk in group:
+            if chunk is not None:
+                evidence.setdefault(chunk.metadata["chunk_id"], chunk)
+                if len(evidence) == EVIDENCE_LIMIT:
+                    return list(evidence.values())
+    return list(evidence.values())

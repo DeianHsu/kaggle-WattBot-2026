@@ -8,7 +8,11 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.messages.content import create_text_block
 
 from wattbot_simple.cost import record_cost
-from wattbot_simple.generate import build_evidence_blocks
+from wattbot_simple.generate import (
+    FOLLOW_UP_PROMPT,
+    build_evidence_blocks,
+    generate_with_retrieval,
+)
 from wattbot_simple.index import open_chroma_store
 from wattbot_simple.model import create_llm
 from wattbot_simple.retrieve import create_evidence_retriever
@@ -83,17 +87,14 @@ def normalize_prediction_result(result, citation_map):
     return result
 
 
-# 完成一道比赛题的检索与回答，并整理成提交文件的一行。
-def predict_question(question, retriever, llm, paper_urls):
-    # 检索相关证据，并把题目指定单位一起传给模型。
-    evidence = retriever.invoke(question["question"])
+def _draft_prediction(question, evidence, llm):
     evidence_blocks, citation_map = build_evidence_blocks(evidence)
     question_block = create_text_block(
         f"问题\n{question['question']}\n\n指定单位\n{question['answer_unit']}"
     )
     # 首次生成失败时，将具体输出错误反馈给模型，只纠正一次。
     messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
+        SystemMessage(content=f"{SYSTEM_PROMPT}\n{FOLLOW_UP_PROMPT}"),
         HumanMessage(content_blocks=[question_block, *evidence_blocks]),
     ]
     for attempt in range(2):
@@ -114,6 +115,16 @@ def predict_question(question, retriever, llm, paper_urls):
                 )),
             ])
 
+    return result, citation_map
+
+
+# 完成一道比赛题的检索与回答，并整理成提交文件的一行。
+def predict_question(question, retriever, llm, paper_urls):
+    result, citation_map = generate_with_retrieval(
+        question["question"], retriever, llm,
+        lambda evidence: _draft_prediction(question, evidence, llm),
+        answer_unit=question["answer_unit"],
+    )
     answer = result["answer"]
     value = result["answer_value"]
     explanation = result["explanation"]

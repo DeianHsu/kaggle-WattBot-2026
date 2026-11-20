@@ -13,10 +13,8 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 def answer_question(question, retriever):
     # 单题调试以问题正文为标识，共用批量预测的成本记录流程。
     with record_cost(ROOT_DIR / "answer_cost.json", question):
-        # 先取回相关证据，再交给回答流程组织图文请求。
-        evidence = retriever.invoke(question)
         llm = create_llm()
-        answer_result = generate_answer(question, evidence, llm)
+        answer_result = generate_answer(question, retriever, llm)
     return answer_result
 
 
