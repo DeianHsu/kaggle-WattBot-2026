@@ -1,3 +1,5 @@
+# 批量生成比赛提交文件，按题保存答案和成本，支持从已有结果续跑。
+
 import argparse
 import csv
 import json
@@ -92,11 +94,11 @@ def _draft_prediction(question, evidence, llm):
     question_block = create_text_block(
         f"问题\n{question['question']}\n\n指定单位\n{question['answer_unit']}"
     )
-    # 首次生成失败时，将具体输出错误反馈给模型，只纠正一次。
     messages = [
         SystemMessage(content=f"{SYSTEM_PROMPT}\n{FOLLOW_UP_PROMPT}"),
         HumanMessage(content_blocks=[question_block, *evidence_blocks]),
     ]
+    # 解析或校验输出失败时，把错误反馈给模型，最多纠正一次。
     for attempt in range(2):
         try:
             result = llm.invoke(messages)
@@ -155,7 +157,6 @@ def predict_question(question, retriever, llm, paper_urls):
     }
 
 
-# 读取题库路径、输出路径、指定题号和思考强度。
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("questions", type=Path)
@@ -190,9 +191,8 @@ def read_completed_ids(output_path):
     return done_ids
 
 
-# 按题库顺序逐题预测并保存结果，重启时从已保存的位置继续。
+# 默认按题库顺序处理。指定 --ids 时按传入的题号顺序处理。
 def predict(questions_path, output_path, ids=None, chroma_store=None, thinking="none"):
-    # 读取题库，并按指定题号选择本次处理范围。
     with questions_path.open(encoding="utf-8-sig", newline="") as file:
         questions = list(csv.DictReader(file))
     if ids:
@@ -201,14 +201,12 @@ def predict(questions_path, output_path, ids=None, chroma_store=None, thinking="
     if not questions or len({q["id"] for q in questions}) != len(questions):
         raise ValueError("题库至少要有一道题，题号不能重复")
 
-    # 先确认已有记录写入完整，再统计可跳过的题号。
     done_ids = read_completed_ids(output_path)
 
-    # 完整记录必须对应本次题目顺序的连续前缀。
+    # 续跑时，已有答案必须从第一题起连续对应本次的处理顺序。
     if done_ids != [q["id"] for q in questions[:len(done_ids)]]:
         raise ValueError("已有输出与本次题目顺序不一致")
 
-    # 从第一个尚未保存的题目继续，全部完成时直接结束。
     start = len(done_ids)
     if start == len(questions):
         print("这批题目已经全部完成")

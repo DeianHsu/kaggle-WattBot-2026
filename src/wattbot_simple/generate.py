@@ -1,3 +1,6 @@
+# 将检索到的文本、表格和原图组装成带证据标签的模型输入。
+# 根据图文证据生成回答，并把引用标签还原为论文来源、页码和文本块标识。
+
 import json
 import logging
 from pathlib import Path
@@ -68,7 +71,7 @@ def build_evidence_blocks(evidence):
     citation_map = {}
 
     for num, chunk in enumerate(evidence):
-        # 为当前证据分配引用标签，并把正文和论文标识一起交给模型。
+        # 将检索文字和论文标识放在同一个证据标签下。
         label = f"Evidence_{num}"
         metadata = chunk.metadata
         items = json.loads(metadata["dl_meta"])["doc_items"]

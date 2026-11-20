@@ -1,3 +1,7 @@
+# 使用 Docling 解析 PDF 论文，并把正文、表格和图片相关文字切分为检索块。
+# 保存结构化解析文档和图表原图，供回答时回查完整证据。
+# 为每个文本块保留来源、原始元素和解析文件路径。
+
 from pathlib import Path
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -29,7 +33,7 @@ def create_converter_and_chunker():
             )
         },
     )
-    # 使用与向量模型匹配的分词器，按 400 个词元配置分块长度。
+    # 使用向量模型配套的分词器计算分块长度。
     tokenizer = HuggingFaceTokenizer.from_pretrained(
         model_name="BAAI/bge-small-en-v1.5",
         max_tokens=400,
@@ -50,7 +54,7 @@ def chunk_pdf_document(pdf_path, pdf_document, document_path, chunker, parsed_pa
         chunk_overlap=0,
     )
 
-    # 有图题或内部文字的图片，仍按原来的方式分块。
+    # 图片优先按图题分块，缺少图题时用图内文字。
     for picture in pdf_document.pictures:
         picture_text = picture.caption_text(pdf_document).strip() or "\n".join(
             item.text
@@ -65,7 +69,7 @@ def chunk_pdf_document(pdf_path, pdf_document, document_path, chunker, parsed_pa
             for picture_text_chunk in text_splitter.split_text(picture_text)
         )
 
-    # 提取匹配前的 PDF 文字，补充表格解析时可能遗漏的检索关键词。
+    # 补取表格区域内的原始文字，减少表格解析遗漏对检索的影响。
     for table in pdf_document.tables:
         table_prov = table.prov[0]
         table_text = table.caption_text(pdf_document) + "\n" + " ".join(

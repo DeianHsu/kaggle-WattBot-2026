@@ -1,3 +1,5 @@
+# 建立和打开本地 Chroma 论文索引。
+
 import json
 from argparse import ArgumentParser
 from pathlib import Path
@@ -10,9 +12,8 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 PAPERS_DIR = ROOT_DIR / "papers"
 
 
-# 使用 BGE 向量模型打开本地 Chroma 索引。
 def open_chroma_store():
-    # 使用归一化向量，使建库与查询采用相同的向量表示。
+    # 建库和查询共用向量模型与归一化设置。
     embedding_model = HuggingFaceEmbeddings(
         model_name="BAAI/bge-small-en-v1.5",
         encode_kwargs={"normalize_embeddings": True},

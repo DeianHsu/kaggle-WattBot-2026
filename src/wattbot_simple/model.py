@@ -1,3 +1,5 @@
+# 创建问答和图表描述共用的模型客户端，组装图文输入。
+
 import os
 from base64 import b64encode
 from pathlib import Path
@@ -14,18 +16,15 @@ VISUAL_DESCRIPTION_PROMPT = (
 )
 
 
-# 读取访问密钥并创建 DeepSeek 问答模型，默认关闭思考。
 def create_llm(thinking="none"):
-    # 从项目的环境配置文件加载模型访问密钥。
     load_dotenv(ROOT_DIR / ".env")
-    # 按强度开关思考；开启时采用接口默认输出上限，避免原来的短上限截断思考。
+    # 开启思考时沿用接口默认输出上限，为推理留出空间。
     extra_body = {
         "thinking": {"type": "disabled" if thinking == "none" else "enabled"},
     }
     if thinking == "none":
         extra_body["max_tokens"] = 2048
 
-    # 复用同一个模型配置，只将思考强度交给调用方设置。
     return ChatOpenAI(
         model="deepseek-flash",
         api_key=os.environ["DEEPSEEK_API_KEY"],
