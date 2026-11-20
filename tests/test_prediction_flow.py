@@ -14,6 +14,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.output_parsers import JsonOutputParser
 
 from wattbot_simple import predict
+from wattbot_simple.generate import generate_with_retrieval
 
 
 def _response(content):
@@ -83,6 +84,23 @@ class PredictionFlowTest(unittest.TestCase):
 
     def _cost(self):
         return json.loads(self.cost.read_text(encoding="utf-8"))
+
+    def test_retrieves_all_planned_fact_queries(self):
+        question = "Compare five measurements"
+        queries = [f"Measurement {number}" for number in range(1, 6)]
+        chunks = [_chunk(query) for query in queries]
+        self.retriever.invoke.side_effect = [[], *([chunk] for chunk in chunks)]
+        llm = Mock()
+        llm.invoke.return_value = {"queries": queries}
+        draft_answer = Mock(return_value=({}, {}))
+
+        generate_with_retrieval(question, self.retriever, llm, draft_answer)
+
+        self.assertEqual(
+            self.retriever.invoke.call_args_list,
+            [call(query) for query in [question, *queries]],
+        )
+        draft_answer.assert_called_once_with(chunks)
 
     def test_follow_up_citations_and_all_model_usage_are_saved(self):
         self.retriever.invoke.side_effect = [
