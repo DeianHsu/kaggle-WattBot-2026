@@ -19,8 +19,8 @@ SEARCH_PROMPT = """为论文检索规划简短查询。原问题会单独检索�
 保留各事实自己的年份、单位、范围和条件。沿用问题中的术语，必要时补一个常用英文术语写法。
 只给检索短语，禁止猜测答案、未给出的数值或论文。单一事实已表述清楚时返回空列表。
 输出 JSON：{"queries": ["short search phrase"]}。"""
-FOLLOW_UP_PROMPT = """首轮证据若缺少回答所必需的事实，在 JSON 的 missing_queries 中列出最多两条简短检索查询。
-每条只查一个具体缺项，保留对象、指标和条件。证据齐全时返回空列表。
+FOLLOW_UP_PROMPT = """首轮证据若缺少回答所必需的事实，在 JSON 的 missing_queries 中为每个缺项列一条简短检索查询。
+保留各缺项的对象、指标和条件，可用已有证据中的论文名或术语帮助定位。证据齐全时返回空列表。
 补查后的回答依据更新后的证据，缺少关键事实时仍按原规则说明证据不足。"""
 SYSTEM_PROMPT = (
     "只根据给定证据，用中文简洁回答问题。"
@@ -54,7 +54,7 @@ def generate_with_retrieval(question, retriever, llm, draft_answer, answer_unit=
     result, citation_map = draft_answer(evidence)
     asked = {query.casefold() for query in queries}
     follow_up = [
-        query for query in _read_queries(result, "missing_queries")[:2]
+        query for query in _read_queries(result, "missing_queries")
         if query.casefold() not in asked
     ]
     if follow_up:
