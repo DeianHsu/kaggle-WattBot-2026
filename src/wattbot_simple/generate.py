@@ -14,8 +14,8 @@ from wattbot_simple.retrieve import retrieve_queries
 
 logger = logging.getLogger(__name__)
 
-SEARCH_PROMPT = """为论文检索规划最多三条简短查询。原问题会单独检索。
-比较、计算和跨论文问题按必需事实拆开，让每条查询独立描述一个对象和指标。
+SEARCH_PROMPT = """为论文检索规划简短查询。原问题会单独检索。
+比较、计算和跨论文问题按回答所需的独立事实拆分，每项事实写一条查询，明确对象和指标。
 保留各事实自己的年份、单位、范围和条件。沿用问题中的术语，必要时补一个常用英文术语写法。
 只给检索短语，禁止猜测答案、未给出的数值或论文。单一事实已表述清楚时返回空列表。
 输出 JSON：{"queries": ["short search phrase"]}。"""
@@ -31,12 +31,12 @@ SYSTEM_PROMPT = (
 )
 
 
-def _read_queries(result, field, limit):
+def _read_queries(result, field):
     queries = result.get(field, []) if isinstance(result, dict) else []
     if not isinstance(queries, list) or any(not isinstance(query, str) for query in queries):
         logger.warning("忽略格式异常的检索字段 %s", field)
         return []
-    return list(dict.fromkeys(query.strip() for query in queries if query.strip()))[:limit]
+    return list(dict.fromkeys(query.strip() for query in queries if query.strip()))
 
 
 def generate_with_retrieval(question, retriever, llm, draft_answer, answer_unit=""):
@@ -49,12 +49,12 @@ def generate_with_retrieval(question, retriever, llm, draft_answer, answer_unit=
         logger.warning("检索规划无法解析，使用原问题检索")
         plan = {}
 
-    queries = list(dict.fromkeys([question, *_read_queries(plan, "queries", 3)]))
+    queries = list(dict.fromkeys([question, *_read_queries(plan, "queries")]))
     evidence = retrieve_queries(retriever, queries)
     result, citation_map = draft_answer(evidence)
     asked = {query.casefold() for query in queries}
     follow_up = [
-        query for query in _read_queries(result, "missing_queries", 2)
+        query for query in _read_queries(result, "missing_queries")[:2]
         if query.casefold() not in asked
     ]
     if follow_up:
