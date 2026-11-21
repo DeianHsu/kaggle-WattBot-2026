@@ -63,7 +63,6 @@ class PredictionFlowTest(unittest.TestCase):
         self.cost = root / "prediction_cost.json"
         self.retriever = Mock()
         self.enterContext(patch.object(predict, "ROOT_DIR", root))
-        self.enterContext(patch.object(predict, "open_bm25_retriever"))
         self.enterContext(patch.object(
             predict, "create_evidence_retriever", return_value=self.retriever,
         ))

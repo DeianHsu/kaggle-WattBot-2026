@@ -1,16 +1,10 @@
-# 建立和打开本地 Chroma 向量索引和 BM25 关键词索引。
+# 建立和打开本地 Chroma 论文索引。
 
 import json
-import re
 from argparse import ArgumentParser
 from pathlib import Path
-
 from langchain_chroma import Chroma
-from langchain_community.retrievers import BM25Retriever
-from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
-from rank_bm25 import BM25Okapi
-
 from wattbot_simple.ingest import create_converter_and_chunker, ingest_pdf
 from wattbot_simple.model import create_llm
 
@@ -31,44 +25,6 @@ def open_chroma_store():
         persist_directory=str(ROOT_DIR / "chroma_db"),
     )
     return chroma_store
-
-
-# 使用 Chroma 中的全部检索块构建 BM25，并覆盖磁盘上的旧索引。
-def build_bm25_index(chroma_store):
-    chunk_ids = chroma_store.get(include=[])["ids"]
-    if not chunk_ids:
-        raise ValueError("索引为空，请先完成建库")
-    chunks = chroma_store.get_by_ids(chunk_ids)
-    retriever = BM25Retriever.from_documents(
-        documents=chunks,
-        k=30,
-        preprocess_func=lambda text: re.findall(r"\w+", text.lower()),
-    )
-
-    directory = Path(chroma_store._client.get_settings().persist_directory)
-    snapshot = {
-        "documents": [doc.model_dump() for doc in retriever.docs],
-        "vectorizer": vars(retriever.vectorizer),
-    }
-    with (directory / "bm25.json").open("w", encoding="utf-8") as file:
-        json.dump(snapshot, file, ensure_ascii=False)
-
-
-# 预测时直接读取与 Chroma 一起保存的 BM25 索引。
-def open_bm25_retriever(chroma_store):
-    directory = Path(chroma_store._client.get_settings().persist_directory)
-    with (directory / "bm25.json").open(encoding="utf-8") as file:
-        snapshot = json.load(file)
-
-    # 按落盘顺序恢复文档和词频，保留 BM25 同分时的排序。
-    vectorizer = BM25Okapi.__new__(BM25Okapi)
-    vars(vectorizer).update(snapshot["vectorizer"])
-    return BM25Retriever(
-        vectorizer=vectorizer,
-        docs=[Document.model_validate(doc) for doc in snapshot["documents"]],
-        k=30,
-        preprocess_func=lambda text: re.findall(r"\w+", text.lower()),
-    )
 
 
 # 解析未入库的论文，将正文和图表的检索文本一并写入索引。
@@ -113,7 +69,6 @@ def build_chroma_index(papers_dir):
         )
         print(f"[{paper_no}/{len(pdf_paths)}] 已完成 {pdf_path.name}", flush=True)
 
-    build_bm25_index(chroma_store)
     return chroma_store
 
 
