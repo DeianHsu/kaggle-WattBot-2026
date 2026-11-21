@@ -2,7 +2,6 @@
 # 根据图文证据生成回答，并把引用标签还原为论文来源、页码和文本块标识。
 
 import json
-import logging
 from pathlib import Path
 
 from docling_core.types import DoclingDocument
@@ -14,7 +13,6 @@ from langchain_core.messages.content import create_text_block
 from wattbot_simple.model import load_image_block
 from wattbot_simple.retrieve import retrieve_queries
 
-logger = logging.getLogger(__name__)
 
 SEARCH_PROMPT = """为论文检索规划简短查询。原问题会单独检索。
 比较、计算和跨论文问题按回答所需的独立事实拆分，每项事实写一条查询，明确对象和指标。
@@ -39,16 +37,13 @@ def retrieve_evidence(question, retriever, llm, answer_unit=""):
     try:
         plan = llm.invoke(messages)
     except OutputParserException:
-        logger.warning("检索规划无法解析，使用原问题检索")
-    else:
-        subqueries = plan.get("queries") if isinstance(plan, dict) else None
-        if isinstance(subqueries, list) and all(
-            isinstance(query, str) for query in subqueries
-        ):
-            queries.extend(query.strip() for query in subqueries if query.strip())
-        else:
-            logger.warning("检索规划缺少有效的 queries 列表，使用原问题检索")
+        return retrieve_queries(retriever, queries)
 
+    subqueries = plan.get("queries") if isinstance(plan, dict) else None
+    if isinstance(subqueries, list) and all(
+        isinstance(query, str) for query in subqueries
+    ):
+        queries.extend(query.strip() for query in subqueries if query.strip())
     queries = list(dict.fromkeys(queries))
     return retrieve_queries(retriever, queries)
 
