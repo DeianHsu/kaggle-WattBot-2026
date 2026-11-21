@@ -5,7 +5,6 @@ from argparse import ArgumentParser
 from pathlib import Path
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-from wattbot_simple.ingest import create_converter_and_chunker, ingest_pdf
 from wattbot_simple.model import create_llm
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -29,6 +28,8 @@ def open_chroma_store():
 
 # 解析未入库的论文，将正文和图表的检索文本一并写入索引。
 def build_chroma_index(papers_dir):
+    from wattbot_simple.ingest import create_converter_and_chunker, ingest_pdf
+
     pdf_paths = sorted(papers_dir.glob("*.pdf"))
     if not pdf_paths:
         raise FileNotFoundError(f"目录中没有 PDF：{papers_dir}")
