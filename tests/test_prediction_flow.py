@@ -14,7 +14,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.output_parsers import JsonOutputParser
 
 from wattbot_simple import predict
-from wattbot_simple.generate import generate_with_retrieval
+from wattbot_simple.generate import retrieve_evidence
 
 
 def _response(content):
@@ -92,48 +92,18 @@ class PredictionFlowTest(unittest.TestCase):
         self.retriever.invoke.side_effect = [[], *([chunk] for chunk in chunks)]
         llm = Mock()
         llm.invoke.return_value = {"queries": queries}
-        draft_answer = Mock(return_value=({}, {}))
-
-        generate_with_retrieval(question, self.retriever, llm, draft_answer)
+        evidence = retrieve_evidence(question, self.retriever, llm)
 
         self.assertEqual(
             self.retriever.invoke.call_args_list,
             [call(query) for query in [question, *queries]],
         )
-        draft_answer.assert_called_once_with(chunks)
+        self.assertEqual(evidence, chunks)
 
-    def test_retrieves_all_missing_fact_queries(self):
-        question = "Compare four measurements"
-        queries = [f"Measurement {paper}" for paper in "abcd"]
-        follow_up = [f"{query} annual report" for query in queries[1:]]
-        chunks = [_chunk(paper) for paper in "abcd"]
-        self.retriever.invoke.side_effect = [
-            [chunks[0]], [chunks[0]], [], [], [],
-            *([chunk] for chunk in chunks[1:]),
-        ]
-        llm = Mock()
-        llm.invoke.return_value = {"queries": queries}
-        draft_answer = Mock(side_effect=[
-            ({"missing_queries": follow_up}, {}),
-            ({}, {}),
-        ])
-
-        generate_with_retrieval(question, self.retriever, llm, draft_answer)
-
-        self.assertEqual(
-            self.retriever.invoke.call_args_list,
-            [call(query) for query in [question, *queries, *follow_up]],
-        )
-        self.assertEqual(
-            draft_answer.call_args_list, [call(chunks[:1]), call(chunks)],
-        )
-
-    def test_follow_up_citations_and_all_model_usage_are_saved(self):
-        self.retriever.invoke.side_effect = [
-            [_chunk("a")], [_chunk("a")], [_chunk("b")],
-        ]
+    def test_missing_evidence_returns_blank_without_more_search(self):
+        self.retriever.invoke.return_value = [_chunk("a")]
         self._set_responses(
-            {"queries": ["First measurement"]},
+            {"queries": []},
             {
                 "answer": "Evidence is incomplete.",
                 "answer_value": "is_blank",
@@ -142,6 +112,25 @@ class PredictionFlowTest(unittest.TestCase):
                 "citations": [],
                 "missing_queries": ["Second measurement"],
             },
+        )
+
+        self._run()
+
+        self.retriever.invoke.assert_called_once_with(
+            "Compare the two measurements",
+        )
+        with self.output.open(encoding="utf-8", newline="") as file:
+            row, = csv.DictReader(file)
+        for field in ("answer_value", "ref_id", "ref_url", "supporting_materials"):
+            self.assertEqual(row[field], "is_blank")
+        self.assertEqual(self._cost()["total"]["total_tokens"], 24)
+
+    def test_citations_and_model_usage_are_saved(self):
+        self.retriever.invoke.side_effect = [
+            [_chunk("a")], [_chunk("a")], [_chunk("b")],
+        ]
+        self._set_responses(
+            {"queries": ["First measurement", "Second measurement"]},
             {
                 "answer": "12 percent",
                 "answer_value": "12",
@@ -164,9 +153,9 @@ class PredictionFlowTest(unittest.TestCase):
         self.assertEqual(json.loads(row["ref_id"]), ["a", "b"])
         record, = self._cost()["records"]
         self.assertEqual(record["status"], "success")
-        self.assertEqual(record["total_tokens"], 36)
-        self.assertEqual(record["cache_hit_tokens"], 9)
-        self.assertEqual(self._cost()["total"]["total_tokens"], 36)
+        self.assertEqual(record["total_tokens"], 24)
+        self.assertEqual(record["cache_hit_tokens"], 6)
+        self.assertEqual(self._cost()["total"]["total_tokens"], 24)
 
     def test_failed_prediction_preserves_usage_and_can_resume(self):
         self.retriever.invoke.return_value = [_chunk("a")]

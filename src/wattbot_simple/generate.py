@@ -19,9 +19,6 @@ SEARCH_PROMPT = """为论文检索规划简短查询。原问题会单独检索�
 保留各事实自己的年份、单位、范围和条件。沿用问题中的术语，必要时补一个常用英文术语写法。
 只给检索短语，禁止猜测答案、未给出的数值或论文。单一事实已表述清楚时返回空列表。
 输出 JSON：{"queries": ["short search phrase"]}。"""
-FOLLOW_UP_PROMPT = """首轮证据若缺少回答所必需的事实，在 JSON 的 missing_queries 中为每个缺项列一条简短检索查询。
-保留各缺项的对象、指标和条件，可用已有证据中的论文名或术语帮助定位。证据齐全时返回空列表。
-补查后的回答依据更新后的证据，缺少关键事实时仍按原规则说明证据不足。"""
 SYSTEM_PROMPT = (
     "只根据给定证据，用中文简洁回答问题。"
     "在事实后用 [Evidence_0] 等标签引用，只能使用提供的标签。"
@@ -31,15 +28,7 @@ SYSTEM_PROMPT = (
 )
 
 
-def _read_queries(result, field):
-    queries = result.get(field, []) if isinstance(result, dict) else []
-    if not isinstance(queries, list) or any(not isinstance(query, str) for query in queries):
-        logger.warning("忽略格式异常的检索字段 %s", field)
-        return []
-    return list(dict.fromkeys(query.strip() for query in queries if query.strip()))
-
-
-def generate_with_retrieval(question, retriever, llm, draft_answer, answer_unit=""):
+def retrieve_evidence(question, retriever, llm, answer_unit=""):
     try:
         plan = llm.invoke([
             SystemMessage(content=SEARCH_PROMPT),
@@ -49,20 +38,15 @@ def generate_with_retrieval(question, retriever, llm, draft_answer, answer_unit=
         logger.warning("检索规划无法解析，使用原问题检索")
         plan = {}
 
-    queries = list(dict.fromkeys([question, *_read_queries(plan, "queries")]))
-    evidence = retrieve_queries(retriever, queries)
-    result, citation_map = draft_answer(evidence)
-    asked = {query.casefold() for query in queries}
-    follow_up = [
-        query for query in _read_queries(result, "missing_queries")
-        if query.casefold() not in asked
-    ]
-    if follow_up:
-        updated = retrieve_queries(retriever, follow_up, previous=evidence)
-        previous_ids = {chunk.metadata["chunk_id"] for chunk in evidence}
-        if any(chunk.metadata["chunk_id"] not in previous_ids for chunk in updated):
-            result, citation_map = draft_answer(updated)
-    return result, citation_map
+    subqueries = plan.get("queries", []) if isinstance(plan, dict) else []
+    if not isinstance(subqueries, list) or any(
+        not isinstance(query, str) for query in subqueries
+    ):
+        logger.warning("忽略格式异常的检索字段 queries")
+        subqueries = []
+    subqueries = [query.strip() for query in subqueries if query.strip()]
+    queries = list(dict.fromkeys([question, *subqueries]))
+    return retrieve_queries(retriever, queries)
 
 
 # 将检索结果组装成图文消息，并建立证据标签到原始来源的映射。
@@ -121,13 +105,14 @@ def build_evidence_blocks(evidence):
     return evidence_blocks, citation_map
 
 
-def _draft_answer(question, evidence, llm):
+# 根据问题和图文证据生成回答，并将模型引用还原成真实来源。
+def generate_answer(question, retriever, llm):
+    llm = llm.with_structured_output(method="json_mode")
+    evidence = retrieve_evidence(question, retriever, llm)
     evidence_blocks, citation_map = build_evidence_blocks(evidence)
 
     messages = [
-        SystemMessage(
-            content=f"{SYSTEM_PROMPT}\n{FOLLOW_UP_PROMPT}",
-        ),
+        SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(
             content_blocks=[
                 create_text_block(f"question:{question}"),
@@ -135,16 +120,7 @@ def _draft_answer(question, evidence, llm):
             ]
         )
     ]
-    return llm.invoke(messages), citation_map
-
-
-# 根据问题和图文证据生成回答，并将模型引用还原成真实来源。
-def generate_answer(question, retriever, llm):
-    llm = llm.with_structured_output(method="json_mode")
-    llm_answer, citation_map = generate_with_retrieval(
-        question, retriever, llm,
-        lambda evidence: _draft_answer(question, evidence, llm),
-    )
+    llm_answer = llm.invoke(messages)
     # 去除重复引用标签，并恢复每条引用的论文来源和页码。
     references = [
         {

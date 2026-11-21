@@ -10,11 +10,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.messages.content import create_text_block
 
 from wattbot_simple.cost import record_cost
-from wattbot_simple.generate import (
-    FOLLOW_UP_PROMPT,
-    build_evidence_blocks,
-    generate_with_retrieval,
-)
+from wattbot_simple.generate import build_evidence_blocks, retrieve_evidence
 from wattbot_simple.index import open_chroma_store
 from wattbot_simple.model import create_llm
 from wattbot_simple.retrieve import create_evidence_retriever
@@ -95,7 +91,7 @@ def _draft_prediction(question, evidence, llm):
         f"问题\n{question['question']}\n\n指定单位\n{question['answer_unit']}"
     )
     messages = [
-        SystemMessage(content=f"{SYSTEM_PROMPT}\n{FOLLOW_UP_PROMPT}"),
+        SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content_blocks=[question_block, *evidence_blocks]),
     ]
     # 解析或校验输出失败时，把错误反馈给模型，最多纠正一次。
@@ -122,11 +118,11 @@ def _draft_prediction(question, evidence, llm):
 
 # 完成一道比赛题的检索与回答，并整理成提交文件的一行。
 def predict_question(question, retriever, llm, paper_urls):
-    result, citation_map = generate_with_retrieval(
+    evidence = retrieve_evidence(
         question["question"], retriever, llm,
-        lambda evidence: _draft_prediction(question, evidence, llm),
         answer_unit=question["answer_unit"],
     )
+    result, citation_map = _draft_prediction(question, evidence, llm)
     answer = result["answer"]
     value = result["answer_value"]
     explanation = result["explanation"]
