@@ -5,12 +5,8 @@ import csv
 import json
 from pathlib import Path
 
-from langchain_core.exceptions import OutputParserException
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_core.messages.content import create_text_block
-
 from wattbot_simple.cost import record_cost
-from wattbot_simple.generate import build_evidence_blocks, retrieve_evidence
+from wattbot_simple.generate import generate_answer
 from wattbot_simple.index import open_chroma_store
 from wattbot_simple.model import create_llm
 from wattbot_simple.retrieve import create_evidence_retriever
@@ -21,125 +17,13 @@ COLUMNS = (
     "id", "question", "answer", "answer_value", "answer_unit",
     "ref_id", "ref_url", "supporting_materials", "explanation",
 )
-SYSTEM_PROMPT = """Answer using only the supplied evidence and return JSON.
-Write answer and explanation in English. Put only the direct answer in
-answer_value. Use explanation to briefly show how the evidence supports it.
-Convert numeric answers to answer_unit even if the question mentions a
-different unit. For 2 million kWh, write "2000000" if the unit is kWh or "2"
-if it is million kWh. Omit units, thousands separators, and words such as
-million from numeric values.
-For terms, use the shortest complete wording from the source, keeping
-necessary modifiers and conjunctions. Do not automatically wrap multiple
-terms in parentheses.
-For true or false questions, use "1" for true and "0" for false.
-Write multiple values in the order requested, and ranges from lower to
-upper bound. Use a string such as "(0.5,1.65)" instead of a JSON array.
-In citations, list only supplied evidence labels that support the answer.
-If the question can be answered, include at least one citation. In
-supporting_materials, quote the source verbatim in its original language
-or give the location of the supporting figure or table.
-If the evidence is insufficient, set answer_value to "is_blank", leave
-citations empty, and briefly explain what evidence is missing in answer
-and explanation.
-All output fields are strings except citations, which is a list of strings.
-An answer_unit of "is_blank" means the question has no specified unit.
 
-Example JSON
-{
-  "answer": "The sample contained 12 items.",
-  "answer_value": "12",
-  "citations": ["Evidence_0"],
-  "supporting_materials": "The sample contained twelve items.",
-  "explanation": "The cited sentence gives the sample count."
-}
-"""
-
-
-# 校验模型输出并去除字符串首尾空白，保留错误输出供模型纠正。
-def normalize_prediction_result(result, citation_map):
-    result_json = json.dumps(result, ensure_ascii=False)
-    if not isinstance(result, dict):
-        raise OutputParserException(
-            "The output must be a JSON object.", llm_output=result_json
-        )
-
-    for field in ("answer", "answer_value", "supporting_materials", "explanation"):
-        if field not in result or not isinstance(result[field], str):
-            raise OutputParserException(
-                f"{field} is missing or is not a string.", llm_output=result_json
-            )
-        result[field] = result[field].strip()
-
-    if "citations" not in result or not isinstance(result["citations"], list):
-        raise OutputParserException(
-            "citations must be a list of strings.", llm_output=result_json
-        )
-    if any(
-        not isinstance(label, str) or label not in citation_map
-        for label in result["citations"]
-    ):
-        raise OutputParserException(
-            "The citations list contains an invalid evidence label.",
-            llm_output=result_json,
-        )
-    if not all(result[field] for field in ("answer", "answer_value", "explanation")):
-        raise OutputParserException(
-            "answer, answer_value, and explanation must be non-empty.",
-            llm_output=result_json,
-        )
-    if result["answer_value"] != "is_blank" and (
-        not result["citations"] or not result["supporting_materials"]
-    ):
-        raise OutputParserException(
-            "An answerable question requires citations and supporting_materials.",
-            llm_output=result_json,
-        )
-    return result
-
-
-def _draft_prediction(question, evidence, llm):
-    evidence_blocks, citation_map = build_evidence_blocks(evidence)
-    question_block = create_text_block(
-        f"Question: {question['question']}\n"
-        f"Requested unit: {question['answer_unit']}"
-    )
-    messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content_blocks=[question_block, *evidence_blocks]),
-    ]
-    # 解析或校验输出失败时，把错误反馈给模型，最多纠正一次。
-    for attempt in range(2):
-        try:
-            result = llm.invoke(messages)
-            result = normalize_prediction_result(result, citation_map)
-            break
-        except OutputParserException as exc:
-            if attempt == 1:
-                raise
-            messages.extend([
-                AIMessage(
-                    content=exc.llm_output
-                    or "The previous response was not valid JSON."
-                ),
-                HumanMessage(content=(
-                    f"Please correct the previous output: {exc}\n"
-                    f"Available evidence labels: {', '.join(citation_map)}.\n"
-                    "Use the original question and evidence to return complete JSON. "
-                    "Cite only evidence that supports the answer. "
-                    "If the evidence is insufficient, set answer_value to is_blank."
-                )),
-            ])
-
-    return result, citation_map
-
-
-# 完成一道比赛题的检索与回答，并整理成提交文件的一行。
+# 将一道题的答案和引用整理成提交文件的一行。
 def predict_question(question, retriever, llm, paper_urls):
-    evidence = retrieve_evidence(
+    result, citation_map = generate_answer(
         question["question"], retriever, llm,
         answer_unit=question["answer_unit"],
     )
-    result, citation_map = _draft_prediction(question, evidence, llm)
     answer = result["answer"]
     value = result["answer_value"]
     explanation = result["explanation"]
