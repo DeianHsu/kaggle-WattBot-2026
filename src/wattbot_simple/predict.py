@@ -7,7 +7,7 @@ from pathlib import Path
 
 from wattbot_simple.cost import record_cost
 from wattbot_simple.generate import generate_answer
-from wattbot_simple.index import open_chroma_store
+from wattbot_simple.index import open_bm25_retriever, open_chroma_store
 from wattbot_simple.model import create_llm
 from wattbot_simple.retrieve import create_evidence_retriever
 
@@ -118,7 +118,8 @@ def predict(questions_path, output_path, ids=None, chroma_store=None, thinking="
     # 准备本轮共用的检索器和模型；未传入索引时打开本地索引。
     if chroma_store is None:
         chroma_store = open_chroma_store()
-    retriever = create_evidence_retriever(chroma_store)
+    bm25_retriever = open_bm25_retriever(chroma_store)
+    retriever = create_evidence_retriever(chroma_store, bm25_retriever)
     llm = create_llm(thinking=thinking).with_structured_output(method="json_mode")
 
     # 成本单独保存，沿用提交文件名，续跑时继续累计已有账目。

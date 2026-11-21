@@ -1,31 +1,19 @@
 # 组合向量检索和 BM25 关键词检索，再用交叉编码器重排候选证据。
 
-import re
 from itertools import zip_longest
 
 from langchain_classic.retrievers.document_compressors import CrossEncoderReranker
 from langchain_community.cross_encoders import HuggingFaceCrossEncoder
 from langchain_classic.retrievers import EnsembleRetriever, ContextualCompressionRetriever
-from langchain_community.retrievers import BM25Retriever
 
 
 EVIDENCE_LIMIT = 20
 
 
-def create_hybrid_retriever(chroma_store):
-    # 读取全部索引文本，供关键词检索器建立词频统计。
-    chunk_ids = chroma_store.get(include=[])["ids"]
-    if not chunk_ids:
-        raise ValueError("索引为空，请先完成建库")
-    chunks = chroma_store.get_by_ids(chunk_ids)
+def create_hybrid_retriever(chroma_store, bm25_retriever):
     vector_retriever = chroma_store.as_retriever(
         search_type="similarity",
         search_kwargs={"k": 30},
-    )
-    bm25_retriever = BM25Retriever.from_documents(
-        documents=chunks,
-        k=30,
-        preprocess_func=lambda text: re.findall(r"\w+", text.lower()),
     )
     # 合并两路候选排名，并按文本块标识去重。
     return EnsembleRetriever(
@@ -36,8 +24,8 @@ def create_hybrid_retriever(chroma_store):
 
 
 # 创建检索器，在收到问题后执行召回和重排。
-def create_evidence_retriever(chroma_store):
-    hybrid_retriever = create_hybrid_retriever(chroma_store)
+def create_evidence_retriever(chroma_store, bm25_retriever):
+    hybrid_retriever = create_hybrid_retriever(chroma_store, bm25_retriever)
     rerank_model = HuggingFaceCrossEncoder(
         model_name="BAAI/bge-reranker-base",
     )
