@@ -1,11 +1,9 @@
 # 建立和打开本地 Chroma 向量索引和 BM25 关键词索引。
 
-import gzip
 import json
 import re
 from argparse import ArgumentParser
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from langchain_chroma import Chroma
 from langchain_community.retrievers import BM25Retriever
@@ -35,16 +33,6 @@ def open_chroma_store():
     return chroma_store
 
 
-def _tokenize_bm25(text):
-    return re.findall(r"\w+", text.lower())
-
-
-def _bm25_path(chroma_store):
-    settings = chroma_store._client.get_settings()
-    if settings.is_persistent:
-        return Path(settings.persist_directory) / "bm25.json.gz"
-
-
 # 使用 Chroma 中的全部检索块构建 BM25，并覆盖磁盘上的旧索引。
 def build_bm25_index(chroma_store):
     chunk_ids = chroma_store.get(include=[])["ids"]
@@ -54,56 +42,32 @@ def build_bm25_index(chroma_store):
     retriever = BM25Retriever.from_documents(
         documents=chunks,
         k=30,
-        preprocess_func=_tokenize_bm25,
+        preprocess_func=lambda text: re.findall(r"\w+", text.lower()),
     )
 
-    index_path = _bm25_path(chroma_store)
-    if index_path is None:
-        return retriever
-
+    directory = Path(chroma_store._client.get_settings().persist_directory)
     snapshot = {
-        "collection_id": str(chroma_store._collection.id),
         "documents": [doc.model_dump() for doc in retriever.docs],
         "vectorizer": vars(retriever.vectorizer),
     }
-    # 写完再替换，避免预测读到只写了一部分的索引。
-    with TemporaryDirectory(dir=index_path.parent) as directory:
-        temporary_path = Path(directory) / index_path.name
-        with gzip.open(
-            temporary_path, "wt", compresslevel=1, encoding="utf-8",
-        ) as file:
-            json.dump(snapshot, file, ensure_ascii=False, separators=(",", ":"))
-        temporary_path.replace(index_path)
-    return retriever
+    with (directory / "bm25.json").open("w", encoding="utf-8") as file:
+        json.dump(snapshot, file, ensure_ascii=False)
 
 
-# 预测时读取已保存的 BM25。旧库缺文件或检索块发生变化时补建。
+# 预测时直接读取与 Chroma 一起保存的 BM25 索引。
 def open_bm25_retriever(chroma_store):
-    index_path = _bm25_path(chroma_store)
-    if index_path is None:
-        return build_bm25_index(chroma_store)
-    try:
-        with gzip.open(index_path, "rt", encoding="utf-8") as file:
-            snapshot = json.load(file)
-    except FileNotFoundError:
-        return build_bm25_index(chroma_store)
-
-    documents = snapshot["documents"]
-    chunk_ids = chroma_store.get(include=[])["ids"]
-    if (
-        snapshot["collection_id"] != str(chroma_store._collection.id)
-        or {doc["id"] for doc in documents} != set(chunk_ids)
-    ):
-        return build_bm25_index(chroma_store)
+    directory = Path(chroma_store._client.get_settings().persist_directory)
+    with (directory / "bm25.json").open(encoding="utf-8") as file:
+        snapshot = json.load(file)
 
     # 按落盘顺序恢复文档和词频，保留 BM25 同分时的排序。
     vectorizer = BM25Okapi.__new__(BM25Okapi)
     vars(vectorizer).update(snapshot["vectorizer"])
     return BM25Retriever(
         vectorizer=vectorizer,
-        docs=[Document.model_validate(doc) for doc in documents],
+        docs=[Document.model_validate(doc) for doc in snapshot["documents"]],
         k=30,
-        preprocess_func=_tokenize_bm25,
+        preprocess_func=lambda text: re.findall(r"\w+", text.lower()),
     )
 
 

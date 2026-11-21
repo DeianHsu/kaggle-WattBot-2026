@@ -15,12 +15,11 @@ class BM25IndexTest(unittest.TestCase):
     def setUp(self):
         directory = self.enterContext(tempfile.TemporaryDirectory())
         self.root = Path(directory)
-        self.index_path = self.root / "bm25.json.gz"
+        self.index_path = self.root / "bm25.json"
         self.chroma_store = Mock()
         self.chroma_store._client.get_settings.return_value = SimpleNamespace(
-            is_persistent=True, persist_directory=directory,
+            persist_directory=directory,
         )
-        self.chroma_store._collection.id = "test-collection"
         self.documents = [
             Document(
                 id=f"paper_{number}",
@@ -45,17 +44,19 @@ class BM25IndexTest(unittest.TestCase):
         ]
         return {"ids": ids[:limit]}
 
-    def test_existing_chroma_is_backfilled_and_reload_keeps_rank_order(self):
+    def test_saved_index_keeps_rank_order(self):
         expected = BM25Retriever.from_documents(
             documents=self.documents[::-1],
             k=30,
             preprocess_func=lambda text: re.findall(r"\w+", text.lower()),
         )
 
-        index.open_bm25_retriever(self.chroma_store)
+        index.build_bm25_index(self.chroma_store)
         self.assertTrue(self.index_path.is_file())
+        self.chroma_store.get.reset_mock()
         self.chroma_store.get_by_ids.reset_mock()
         reopened = index.open_bm25_retriever(self.chroma_store)
+        self.chroma_store.get.assert_not_called()
         self.chroma_store.get_by_ids.assert_not_called()
 
         for query in ("SOLAR / kWh", "unknown term"):
@@ -63,7 +64,7 @@ class BM25IndexTest(unittest.TestCase):
                 self.assertEqual(reopened.invoke(query), expected.invoke(query))
 
     def test_build_index_rebuilds_bm25_with_no_new_papers(self):
-        index.open_bm25_retriever(self.chroma_store)
+        index.build_bm25_index(self.chroma_store)
         (self.root / "paper.pdf").touch()
         self.documents[0].page_content = "Wind turbines generated 18 kWh."
         self.chroma_store.get_by_ids.reset_mock()
@@ -81,7 +82,7 @@ class BM25IndexTest(unittest.TestCase):
         )
 
     def test_build_index_refreshes_bm25_after_adding_a_paper(self):
-        index.open_bm25_retriever(self.chroma_store)
+        index.build_bm25_index(self.chroma_store)
         (self.root / "paper.pdf").touch()
         (self.root / "new.pdf").touch()
         chunk = Document(

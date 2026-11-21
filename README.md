@@ -51,7 +51,7 @@ DEEPSEEK_API_KEY=填写密钥
 
 建库会解析正文、图片和表格，保存原图和表格截图，并用 `deepseek-flash` 生成图表描述。描述与正文一并写入索引，命中描述后可取回对应原图。
 
-建库会在 `chroma_db/` 保存 Chroma 向量索引，并用全部检索块重建 BM25 关键词索引 `bm25.json.gz`。单独运行预测时直接加载 BM25 索引。已有 Chroma 库缺少 BM25 索引时，会从现有检索块补建。
+建库会在 `chroma_db/` 保存 Chroma 向量索引，并用全部检索块重建 BM25 关键词索引 `bm25.json`。单独运行预测前先完成建库，预测直接读取这两个索引。
 
 ```powershell
 .\.venv\Scripts\python.exe -m wattbot_simple.index
