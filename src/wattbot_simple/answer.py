@@ -24,7 +24,7 @@ def print_answer(answer_result):
     for reference in answer_result["references"]:
         filename = Path(reference["source"]).name
         pages = ", ".join(map(str, reference["pages"]))
-        print(f"[{reference['label']}] {filename}，PDF 页码：{pages}")
+        print(f"[{reference['label']}] {filename}, PDF pages: {pages}")
 
 
 def answer():

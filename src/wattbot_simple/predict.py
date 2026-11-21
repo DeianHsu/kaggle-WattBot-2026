@@ -21,23 +21,30 @@ COLUMNS = (
     "id", "question", "answer", "answer_value", "answer_unit",
     "ref_id", "ref_url", "supporting_materials", "explanation",
 )
-SYSTEM_PROMPT = """只根据给定证据回答，并输出 JSON。
-answer_value 只写直接答案，不写解释。
-数值以输入的 answer_unit 为准；问题正文使用其他单位时，换算成指定单位。
-按指定单位的数量级输出：原文为 2 million kWh，指定单位为 kWh 时写 "2000000"，为 million kWh 时写 "2"。
-数值不附带单位，不使用千分位逗号或 million 等文字。
-术语使用原文中最短且完整的名称，保留必要的修饰词和连接词，不为多个术语强制添加括号。
-判断题用 "1" 表示真、"0" 表示假。
-多个数值按题目要求的顺序、范围按下限到上限，写成 "(0.5,1.65)" 这样的字符串，不输出 JSON 数组。
-citations 只填本次提供且实际支持答案的证据标签。
-可回答时，citations 至少包含一个标签，supporting_materials 填原文摘录或图表定位。
-explanation 简要说明证据如何支持答案。
-证据不足时，将 answer_value 设为 "is_blank"，citations 设为空列表，
-在 answer 和 explanation 中简要说明缺少什么证据。
-除 citations 为字符串列表外，其余输出字段均为字符串。
-answer_unit 为 "is_blank" 只表示没有指定单位，不表示无法回答。
+SYSTEM_PROMPT = """Answer using only the supplied evidence and return JSON.
+Write answer and explanation in English. Put only the direct answer in
+answer_value. Use explanation to briefly show how the evidence supports it.
+Convert numeric answers to answer_unit even if the question mentions a
+different unit. For 2 million kWh, write "2000000" if the unit is kWh or "2"
+if it is million kWh. Omit units, thousands separators, and words such as
+million from numeric values.
+For terms, use the shortest complete wording from the source, keeping
+necessary modifiers and conjunctions. Do not automatically wrap multiple
+terms in parentheses.
+For true or false questions, use "1" for true and "0" for false.
+Write multiple values in the order requested, and ranges from lower to
+upper bound. Use a string such as "(0.5,1.65)" instead of a JSON array.
+In citations, list only supplied evidence labels that support the answer.
+If the question can be answered, include at least one citation. In
+supporting_materials, quote the source verbatim in its original language
+or give the location of the supporting figure or table.
+If the evidence is insufficient, set answer_value to "is_blank", leave
+citations empty, and briefly explain what evidence is missing in answer
+and explanation.
+All output fields are strings except citations, which is a list of strings.
+An answer_unit of "is_blank" means the question has no specified unit.
 
-JSON 示例
+Example JSON
 {
   "answer": "The sample contained 12 items.",
   "answer_value": "12",
@@ -52,35 +59,40 @@ JSON 示例
 def normalize_prediction_result(result, citation_map):
     result_json = json.dumps(result, ensure_ascii=False)
     if not isinstance(result, dict):
-        raise OutputParserException("输出必须是 JSON 对象", llm_output=result_json)
+        raise OutputParserException(
+            "The output must be a JSON object.", llm_output=result_json
+        )
 
     for field in ("answer", "answer_value", "supporting_materials", "explanation"):
         if field not in result or not isinstance(result[field], str):
             raise OutputParserException(
-                f"{field} 缺失或不是字符串", llm_output=result_json
+                f"{field} is missing or is not a string.", llm_output=result_json
             )
         result[field] = result[field].strip()
 
     if "citations" not in result or not isinstance(result["citations"], list):
         raise OutputParserException(
-            "citations 必须是字符串列表", llm_output=result_json
+            "citations must be a list of strings.", llm_output=result_json
         )
     if any(
         not isinstance(label, str) or label not in citation_map
         for label in result["citations"]
     ):
         raise OutputParserException(
-            "citations 含有无效的证据标签", llm_output=result_json
+            "The citations list contains an invalid evidence label.",
+            llm_output=result_json,
         )
     if not all(result[field] for field in ("answer", "answer_value", "explanation")):
         raise OutputParserException(
-            "答案、答案值和解释不能为空", llm_output=result_json
+            "answer, answer_value, and explanation must be non-empty.",
+            llm_output=result_json,
         )
     if result["answer_value"] != "is_blank" and (
         not result["citations"] or not result["supporting_materials"]
     ):
         raise OutputParserException(
-            "可回答的题目需要引用和佐证材料", llm_output=result_json
+            "An answerable question requires citations and supporting_materials.",
+            llm_output=result_json,
         )
     return result
 
@@ -88,7 +100,8 @@ def normalize_prediction_result(result, citation_map):
 def _draft_prediction(question, evidence, llm):
     evidence_blocks, citation_map = build_evidence_blocks(evidence)
     question_block = create_text_block(
-        f"问题\n{question['question']}\n\n指定单位\n{question['answer_unit']}"
+        f"Question: {question['question']}\n"
+        f"Requested unit: {question['answer_unit']}"
     )
     messages = [
         SystemMessage(content=SYSTEM_PROMPT),
@@ -104,12 +117,16 @@ def _draft_prediction(question, evidence, llm):
             if attempt == 1:
                 raise
             messages.extend([
-                AIMessage(content=exc.llm_output or "上次未返回可解析的 JSON。"),
+                AIMessage(
+                    content=exc.llm_output
+                    or "The previous response was not valid JSON."
+                ),
                 HumanMessage(content=(
-                    f"上次输出不符合要求：{exc}\n"
-                    f"可用证据标签：{', '.join(citation_map)}。\n"
-                    "请结合原问题和证据，重新输出完整 JSON。"
-                    "仅引用实际支持答案的证据；证据不足时按要求返回 is_blank。"
+                    f"Please correct the previous output: {exc}\n"
+                    f"Available evidence labels: {', '.join(citation_map)}.\n"
+                    "Use the original question and evidence to return complete JSON. "
+                    "Cite only evidence that supports the answer. "
+                    "If the evidence is insufficient, set answer_value to is_blank."
                 )),
             ])
 

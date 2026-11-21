@@ -14,24 +14,32 @@ from wattbot_simple.model import load_image_block
 from wattbot_simple.retrieve import retrieve_queries
 
 
-SEARCH_PROMPT = """为论文检索规划简短查询。原问题会单独检索。
-比较、计算和跨论文问题按回答所需的独立事实拆分，每项事实写一条查询，明确对象和指标。
-保留各事实自己的年份、单位、范围和条件。沿用问题中的术语，必要时补一个常用英文术语写法。
-只给检索短语，禁止猜测答案、未给出的数值或论文。单一事实已表述清楚时返回空列表。
-输出 JSON：{"queries": ["short search phrase"]}。"""
+SEARCH_PROMPT = """Plan short English queries to search research papers.
+The original question will be searched separately.
+For comparison, calculation, and cross-paper questions, write one query for
+each independent fact needed to answer. Name the subject and metric in each.
+Keep each fact's year, units, scope, and conditions. Retain the question's
+terms and add a common English variant when useful.
+Return only search phrases. Do not guess answers, values, or papers that
+were not given. Return an empty list if the question clearly asks for a
+single fact.
+Return JSON in this format.
+{"queries": ["short search phrase"]}"""
 SYSTEM_PROMPT = (
-    "只根据给定证据，用中文简洁回答问题。"
-    "在事实后用 [Evidence_0] 等标签引用，只能使用提供的标签。"
-    "证据不足时明确说明，并返回空的 citations 列表。"
-    '输出 JSON：{"answer": "回答 [Evidence_0]", '
-    '"citations": ["Evidence_0"]}。'
+    "Answer concisely in English using only the supplied evidence. "
+    "Write any explanation in English. Quote source text verbatim in its "
+    "original language. Place citations after the claims they support, using "
+    "only the supplied labels such as [Evidence_0]. If the evidence is "
+    "insufficient, say so and return an empty citations list. "
+    'Return JSON in this format: {"answer": "Answer [Evidence_0]", '
+    '"citations": ["Evidence_0"]}.'
 )
 
 
 def retrieve_evidence(question, retriever, llm, answer_unit=""):
     messages = [
         SystemMessage(content=SEARCH_PROMPT),
-        HumanMessage(content=f"{question}\n指定单位：{answer_unit}"),
+        HumanMessage(content=f"{question}\nRequested unit: {answer_unit}"),
     ]
     queries = [question]
     try:
@@ -61,12 +69,12 @@ def build_evidence_blocks(evidence):
         visual_items = [item for item in items if item["label"] in {"table", "picture"}]
         text = chunk.page_content
         if visual_items:
-            text = "请结合随附原图核对图表信息。\n" + text
+            text = "Check the original image to verify the details.\n" + text
 
         evidence_blocks.append(
             create_text_block(
                 f"[{label}]\n"
-                f"论文标识：{Path(metadata['source']).stem}\n"
+                f"Paper ID: {Path(metadata['source']).stem}\n"
                 f"{text}"
             )
         )
@@ -95,7 +103,9 @@ def build_evidence_blocks(evidence):
                 # 解析文字作为辅助，原表图片用于核对数据和行列对应关系。
                 evidence_blocks.append(
                     create_text_block(
-                        "表格解析文字可能缺失或错位，请结合随后原图核对数据和行列。\n"
+                        "The extracted table text may be incomplete or misaligned. "
+                        "Use the original image below to verify the values, rows, "
+                        "and columns.\n"
                         + element.export_to_html(doc=pdf_document)
                     )
                 )
@@ -109,7 +119,7 @@ def generate_answer(question, retriever, llm):
     llm = llm.with_structured_output(method="json_mode")
     evidence = retrieve_evidence(question, retriever, llm)
     evidence_blocks, citation_map = build_evidence_blocks(evidence)
-    question_block = create_text_block(f"question:{question}")
+    question_block = create_text_block(f"Question: {question}")
     messages = [
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content_blocks=[question_block, *evidence_blocks]),
