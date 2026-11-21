@@ -111,8 +111,14 @@ def chunk_pdf_document(pdf_path, pdf_document, document_path, chunker, parsed_pa
     return chunks
 
 
-# 将结构化文档和图片保存到论文对应目录，供问答时回查完整证据。
-def save_pdf_artifacts(pdf_path, pdf_document):
+# 解析一篇 PDF，保存原始解析产物并返回检索块。
+def ingest_pdf(pdf_path, converter, chunker, vlm):
+    # 同时保留解析文档和原始页面文字，供表格文字补充使用。
+    pdf_result = converter.convert(pdf_path)
+    pdf_document = pdf_result.document
+    parsed_pages = {page.page_no: page.parsed_page for page in pdf_result.pages}
+
+    # 将结构化文档和图片保存到论文对应目录，供问答时回查完整证据。
     output_dir = ROOT_DIR / "artifacts" / pdf_path.stem
     output_dir.mkdir(parents=True, exist_ok=True)
     document_path = output_dir / "document.json"
@@ -140,18 +146,7 @@ def save_pdf_artifacts(pdf_path, pdf_document):
         artifacts_dir=Path("document_artifacts"),
         image_mode=ImageRefMode.REFERENCED,
     )
-    return document_path
 
-
-# 解析一篇 PDF，保存原始解析产物并返回检索块。
-def ingest_pdf(pdf_path, converter, chunker, vlm):
-    # 同时保留解析文档和原始页面文字，供表格文字补充使用。
-    pdf_result = converter.convert(pdf_path)
-    pdf_document = pdf_result.document
-    parsed_pages = {page.page_no: page.parsed_page for page in pdf_result.pages}
-
-    document_path = save_pdf_artifacts(pdf_path, pdf_document)
     # 使用刚解析的文档生成检索块，避免重复解析 PDF。
-    return chunk_pdf_document(
-        pdf_path, pdf_document, document_path, chunker, parsed_pages, vlm,
-    )
+    chunks = chunk_pdf_document(pdf_path, pdf_document, document_path, chunker, parsed_pages, vlm)
+    return chunks
