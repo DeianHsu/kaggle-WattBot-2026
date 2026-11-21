@@ -35,49 +35,34 @@ def open_chroma_store():
     return chroma_store
 
 
-# 加载已落盘的 BM25 统计量。首次使用旧库或检索块增删时补建。
-def open_bm25_retriever(chroma_store):
-    def tokenize(text):
-        return re.findall(r"\w+", text.lower())
+def _tokenize_bm25(text):
+    return re.findall(r"\w+", text.lower())
 
+
+def _bm25_path(chroma_store):
+    settings = chroma_store._client.get_settings()
+    if settings.is_persistent:
+        return Path(settings.persist_directory) / "bm25.json.gz"
+
+
+# 使用 Chroma 中的全部检索块构建 BM25，并覆盖磁盘上的旧索引。
+def build_bm25_index(chroma_store):
     chunk_ids = chroma_store.get(include=[])["ids"]
     if not chunk_ids:
         raise ValueError("索引为空，请先完成建库")
-
-    collection_id = str(chroma_store._collection.id)
-    settings = chroma_store._client.get_settings()
-    index_path = (
-        Path(settings.persist_directory) / "bm25.json.gz"
-        if settings.is_persistent else None
-    )
-    if index_path is not None and index_path.is_file():
-        with gzip.open(index_path, "rt", encoding="utf-8") as file:
-            snapshot = json.load(file)
-        documents = snapshot["documents"]
-        if (
-            snapshot["collection_id"] == collection_id
-            and {doc["id"] for doc in documents} == set(chunk_ids)
-        ):
-            # 按落盘顺序恢复文档和词频，保留 BM25 同分时的排序。
-            vectorizer = BM25Okapi.__new__(BM25Okapi)
-            vars(vectorizer).update(snapshot["vectorizer"])
-            return BM25Retriever(
-                vectorizer=vectorizer,
-                docs=[Document.model_validate(doc) for doc in documents],
-                k=30,
-                preprocess_func=tokenize,
-            )
-
+    chunks = chroma_store.get_by_ids(chunk_ids)
     retriever = BM25Retriever.from_documents(
-        documents=chroma_store.get_by_ids(chunk_ids),
+        documents=chunks,
         k=30,
-        preprocess_func=tokenize,
+        preprocess_func=_tokenize_bm25,
     )
+
+    index_path = _bm25_path(chroma_store)
     if index_path is None:
         return retriever
 
     snapshot = {
-        "collection_id": collection_id,
+        "collection_id": str(chroma_store._collection.id),
         "documents": [doc.model_dump() for doc in retriever.docs],
         "vectorizer": vars(retriever.vectorizer),
     }
@@ -90,6 +75,36 @@ def open_bm25_retriever(chroma_store):
             json.dump(snapshot, file, ensure_ascii=False, separators=(",", ":"))
         temporary_path.replace(index_path)
     return retriever
+
+
+# 预测时读取已保存的 BM25。旧库缺文件或检索块发生变化时补建。
+def open_bm25_retriever(chroma_store):
+    index_path = _bm25_path(chroma_store)
+    if index_path is None:
+        return build_bm25_index(chroma_store)
+    try:
+        with gzip.open(index_path, "rt", encoding="utf-8") as file:
+            snapshot = json.load(file)
+    except FileNotFoundError:
+        return build_bm25_index(chroma_store)
+
+    documents = snapshot["documents"]
+    chunk_ids = chroma_store.get(include=[])["ids"]
+    if (
+        snapshot["collection_id"] != str(chroma_store._collection.id)
+        or {doc["id"] for doc in documents} != set(chunk_ids)
+    ):
+        return build_bm25_index(chroma_store)
+
+    # 按落盘顺序恢复文档和词频，保留 BM25 同分时的排序。
+    vectorizer = BM25Okapi.__new__(BM25Okapi)
+    vars(vectorizer).update(snapshot["vectorizer"])
+    return BM25Retriever(
+        vectorizer=vectorizer,
+        docs=[Document.model_validate(doc) for doc in documents],
+        k=30,
+        preprocess_func=_tokenize_bm25,
+    )
 
 
 # 解析未入库的论文，将正文和图表的检索文本一并写入索引。
@@ -134,7 +149,7 @@ def build_chroma_index(papers_dir):
         )
         print(f"[{paper_no}/{len(pdf_paths)}] 已完成 {pdf_path.name}", flush=True)
 
-    open_bm25_retriever(chroma_store)
+    build_bm25_index(chroma_store)
     return chroma_store
 
 

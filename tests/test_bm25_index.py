@@ -62,6 +62,24 @@ class BM25IndexTest(unittest.TestCase):
             with self.subTest(query=query):
                 self.assertEqual(reopened.invoke(query), expected.invoke(query))
 
+    def test_build_index_rebuilds_bm25_with_no_new_papers(self):
+        index.open_bm25_retriever(self.chroma_store)
+        (self.root / "paper.pdf").touch()
+        self.documents[0].page_content = "Wind turbines generated 18 kWh."
+        self.chroma_store.get_by_ids.reset_mock()
+
+        with patch.object(index, "open_chroma_store", return_value=self.chroma_store):
+            index.build_chroma_index(self.root)
+
+        self.chroma_store.get_by_ids.assert_called_once_with(
+            [doc.id for doc in self.documents],
+        )
+        reopened = index.open_bm25_retriever(self.chroma_store)
+        self.assertEqual(
+            reopened.invoke("turbines")[0].page_content,
+            self.documents[0].page_content,
+        )
+
     def test_build_index_refreshes_bm25_after_adding_a_paper(self):
         index.open_bm25_retriever(self.chroma_store)
         (self.root / "paper.pdf").touch()
