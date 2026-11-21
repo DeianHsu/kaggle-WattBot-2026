@@ -1,5 +1,5 @@
 # 将检索到的文本、表格和原图组装成带证据标签的模型输入。
-# 根据图文证据生成回答，并把引用标签还原为论文来源、页码和文本块标识。
+# 规划论文检索查询，并记录各证据标签对应的论文来源、页码和文本块标识。
 
 import json
 from pathlib import Path
@@ -25,15 +25,6 @@ were not given. Return an empty list if the question clearly asks for a
 single fact.
 Return JSON in this format.
 {"queries": ["short search phrase"]}"""
-SYSTEM_PROMPT = (
-    "Answer concisely in English using only the supplied evidence. "
-    "Write any explanation in English. Quote source text verbatim in its "
-    "original language. Place citations after the claims they support, using "
-    "only the supplied labels such as [Evidence_0]. If the evidence is "
-    "insufficient, say so and return an empty citations list. "
-    'Return JSON in this format: {"answer": "Answer [Evidence_0]", '
-    '"citations": ["Evidence_0"]}.'
-)
 
 
 def retrieve_evidence(question, retriever, llm, answer_unit=""):
@@ -112,31 +103,3 @@ def build_evidence_blocks(evidence):
             # 图表共用图片读取与编码逻辑，让模型直接查看原图。
             evidence_blocks.append(load_image_block(element.image, document_path.parent))
     return evidence_blocks, citation_map
-
-
-# 根据问题和图文证据生成回答，并将模型引用还原成真实来源。
-def generate_answer(question, retriever, llm):
-    llm = llm.with_structured_output(method="json_mode")
-    evidence = retrieve_evidence(question, retriever, llm)
-    evidence_blocks, citation_map = build_evidence_blocks(evidence)
-    question_block = create_text_block(f"Question: {question}")
-    messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content_blocks=[question_block, *evidence_blocks]),
-    ]
-    llm_answer = llm.invoke(messages)
-
-    # 去除重复引用标签，并恢复每条引用的论文来源和页码。
-    references = [
-        {
-            "label": label,
-            **citation_map[label],
-        }
-        for label in dict.fromkeys(llm_answer["citations"])
-    ]
-    result = {
-        "answer": llm_answer["answer"],
-        "references": references,
-    }
-
-    return result
