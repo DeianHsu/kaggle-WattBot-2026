@@ -35,29 +35,11 @@ def open_chroma_store():
     return chroma_store
 
 
-def _tokenize_bm25(text):
-    return re.findall(r"\w+", text.lower())
-
-
-def _save_bm25_index(path, collection_id, retriever):
-    snapshot = {
-        "collection_id": collection_id,
-        "documents": [doc.model_dump() for doc in retriever.docs],
-        "vectorizer": vars(retriever.vectorizer),
-    }
-
-    # 写完再替换，避免预测读到只写了一部分的索引。
-    with TemporaryDirectory(dir=path.parent) as directory:
-        temporary_path = Path(directory) / path.name
-        with gzip.open(
-            temporary_path, "wt", compresslevel=1, encoding="utf-8",
-        ) as file:
-            json.dump(snapshot, file, ensure_ascii=False, separators=(",", ":"))
-        temporary_path.replace(path)
-
-
 # 加载已落盘的 BM25 统计量。首次使用旧库或检索块增删时补建。
 def open_bm25_retriever(chroma_store):
+    def tokenize(text):
+        return re.findall(r"\w+", text.lower())
+
     chunk_ids = chroma_store.get(include=[])["ids"]
     if not chunk_ids:
         raise ValueError("索引为空，请先完成建库")
@@ -83,16 +65,30 @@ def open_bm25_retriever(chroma_store):
                 vectorizer=vectorizer,
                 docs=[Document.model_validate(doc) for doc in documents],
                 k=30,
-                preprocess_func=_tokenize_bm25,
+                preprocess_func=tokenize,
             )
 
     retriever = BM25Retriever.from_documents(
         documents=chroma_store.get_by_ids(chunk_ids),
         k=30,
-        preprocess_func=_tokenize_bm25,
+        preprocess_func=tokenize,
     )
-    if index_path is not None:
-        _save_bm25_index(index_path, collection_id, retriever)
+    if index_path is None:
+        return retriever
+
+    snapshot = {
+        "collection_id": collection_id,
+        "documents": [doc.model_dump() for doc in retriever.docs],
+        "vectorizer": vars(retriever.vectorizer),
+    }
+    # 写完再替换，避免预测读到只写了一部分的索引。
+    with TemporaryDirectory(dir=index_path.parent) as directory:
+        temporary_path = Path(directory) / index_path.name
+        with gzip.open(
+            temporary_path, "wt", compresslevel=1, encoding="utf-8",
+        ) as file:
+            json.dump(snapshot, file, ensure_ascii=False, separators=(",", ":"))
+        temporary_path.replace(index_path)
     return retriever
 
 
