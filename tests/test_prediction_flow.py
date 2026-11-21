@@ -17,6 +17,7 @@ from wattbot_simple import predict
 from wattbot_simple.retrieve import retrieve_evidence
 
 
+# 构造带固定用量的模型回执，便于核对多次调用的累计值。
 def _response(content):
     return AIMessage(
         content=json.dumps(content),
@@ -30,6 +31,7 @@ def _response(content):
     )
 
 
+# 为每篇模拟论文提供一块带来源和页码的文本证据。
 def _chunk(paper):
     return Document(
         page_content=f"{paper} reports a measurement.",
@@ -43,7 +45,9 @@ def _chunk(paper):
     )
 
 
+# 用模拟检索器和模型验证题目处理、引用和用量记录。
 class PredictionFlowTest(unittest.TestCase):
+    # 每个用例独立准备题库、论文链接和输出路径。
     def setUp(self):
         directory = tempfile.TemporaryDirectory(prefix="wattbot-prediction-")
         self.addCleanup(directory.cleanup)
@@ -70,6 +74,7 @@ class PredictionFlowTest(unittest.TestCase):
             patch.object(predict, "create_llm"),
         )
 
+    # 按模型调用顺序安排回执，并沿用 JSON 解析流程。
     def _set_responses(self, *responses):
         model = FakeMessagesListChatModel(
             responses=[_response(response) for response in responses],
@@ -79,12 +84,15 @@ class PredictionFlowTest(unittest.TestCase):
             model | structured
         )
 
+    # 从批量入口运行用例，传入占位对象以跳过真实索引初始化。
     def _run(self):
         predict.predict(self.questions, self.output, chroma_store=object())
 
+    # 读回磁盘账本，核对实际写入的单题记录和累计值。
     def _cost(self):
         return json.loads(self.cost.read_text(encoding="utf-8"))
 
+    # 用五项事实检查规划出的子查询是否逐条执行。
     def test_retrieves_all_planned_fact_queries(self):
         question = "Compare five measurements"
         queries = [f"Measurement {number}" for number in range(1, 6)]
@@ -100,6 +108,7 @@ class PredictionFlowTest(unittest.TestCase):
         )
         self.assertEqual(evidence, chunks)
 
+    # 证据不足时，检查提交字段使用 is_blank，且检索停在首轮。
     def test_missing_evidence_returns_blank_without_more_search(self):
         self.retriever.invoke.return_value = [_chunk("a")]
         self._set_responses(
@@ -125,6 +134,7 @@ class PredictionFlowTest(unittest.TestCase):
             self.assertEqual(row[field], "is_blank")
         self.assertEqual(self._cost()["total"]["total_tokens"], 24)
 
+    # 用跨论文回答检查引用还原以及规划、作答两次调用的用量。
     def test_citations_and_model_usage_are_saved(self):
         self.retriever.invoke.side_effect = [
             [_chunk("a")], [_chunk("a")], [_chunk("b")],
@@ -157,6 +167,7 @@ class PredictionFlowTest(unittest.TestCase):
         self.assertEqual(record["cache_hit_tokens"], 6)
         self.assertEqual(self._cost()["total"]["total_tokens"], 24)
 
+    # 验证输出校验失败后保留用量，重跑时从失败的题目继续。
     def test_failed_prediction_preserves_usage_and_can_resume(self):
         self.retriever.invoke.return_value = [_chunk("a")]
         self._set_responses({"queries": []}, {}, {})

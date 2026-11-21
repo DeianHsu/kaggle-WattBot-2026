@@ -142,6 +142,7 @@ def ingest_pdf(pdf_path, converter, chunker, vlm):
     for page in pdf_document.pages.values():
         page.image = None
 
+    # 在结构化文档里保存图片引用，供答题时按元素取回原图。
     pdf_document.save_as_json(
         document_path,
         artifacts_dir=Path("document_artifacts"),

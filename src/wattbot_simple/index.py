@@ -11,6 +11,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 PAPERS_DIR = ROOT_DIR / "papers"
 
 
+# 打开建库和检索共用的本地向量索引。
 def open_chroma_store():
     # 建库和查询共用向量模型与归一化设置。
     embedding_model = HuggingFaceEmbeddings(
@@ -39,6 +40,7 @@ def build_chroma_index(papers_dir):
     for paper_no, pdf_path in enumerate(pdf_paths, start=1):
         pdf_stem = pdf_path.stem
 
+        # 按论文文件名判断是否已入库，避免重复添加检索块。
         existing_ids = chroma_store.get(
             where={"pdf_stem": pdf_stem},
             limit=1,
@@ -48,6 +50,7 @@ def build_chroma_index(papers_dir):
             print(f"已跳过 {pdf_path.name}", flush=True)
             continue
 
+        # 处理首篇待入库论文时，初始化转换器、分块器和图表描述客户端。
         if converter is None:
             vlm = create_llm()
             converter, chunker = create_converter_and_chunker()
@@ -56,6 +59,7 @@ def build_chroma_index(papers_dir):
         if not chunks:
             raise ValueError(f"{pdf_path.name} 未生成可用的检索块")
 
+        # 分配检索块标识，并将原始元素信息转成索引可保存的字符串。
         for chunk_no, chunk in enumerate(chunks):
             chunk_id = f"{pdf_stem}_{chunk_no}"
             chunk.metadata.update(
@@ -73,6 +77,7 @@ def build_chroma_index(papers_dir):
     return chroma_store
 
 
+# 直接运行本模块时，使用默认论文目录建库。
 if __name__ == "__main__":
     ArgumentParser(description="解析论文并为图表生成检索描述").parse_args()
     build_chroma_index(PAPERS_DIR)

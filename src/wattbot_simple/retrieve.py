@@ -11,9 +11,11 @@ from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import HumanMessage, SystemMessage
 
 
+# 单条查询重排后和整题汇总后的证据块上限。
 EVIDENCE_LIMIT = 20
 
 
+# 把多事实题目拆成英文检索短语，便于分别查找各项证据。
 SEARCH_PROMPT = """Plan short English queries to search research papers.
 The original question will be searched separately.
 For comparison, calculation, and cross-paper questions, write one query for
@@ -27,6 +29,7 @@ Return JSON in this format.
 {"queries": ["short search phrase"]}"""
 
 
+# 组合语义相似度和关键词匹配，兼顾同义表述与原文术语。
 def create_hybrid_retriever(chroma_store):
     # 读取全部索引文本，供关键词检索器建立词频统计。
     chunk_ids = chroma_store.get(include=[])["ids"]
@@ -68,17 +71,20 @@ def create_evidence_retriever(chroma_store):
     return evidence_retriever
 
 
+# 合并原问题和模型规划的子查询，检索并汇总本题的证据。
 def retrieve_evidence(question, retriever, llm, answer_unit=""):
     messages = [
         SystemMessage(content=SEARCH_PROMPT),
         HumanMessage(content=f"{question}\nRequested unit: {answer_unit}"),
     ]
     queries = [question]
+    # 规划解析失败时仍用原问题检索。
     try:
         plan = llm.invoke(messages)
     except OutputParserException:
         return retrieve_queries(retriever, queries)
 
+    # 只接收格式有效的查询列表，并按首次出现的顺序去重。
     subqueries = plan.get("queries") if isinstance(plan, dict) else None
     if isinstance(subqueries, list) and all(
         isinstance(query, str) for query in subqueries
@@ -88,6 +94,7 @@ def retrieve_evidence(question, retriever, llm, answer_unit=""):
     return retrieve_queries(retriever, queries)
 
 
+# 将多条查询的检索结果合并为本题最终使用的证据。
 def retrieve_queries(retriever, queries):
     results = [retriever.invoke(query) for query in queries]
     # 按查询轮流取证据，给排名靠前的不同事实各留位置。

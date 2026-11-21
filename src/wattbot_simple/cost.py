@@ -13,6 +13,8 @@ from langchain_core.callbacks import get_usage_metadata_callback
 CACHE_HIT_PRICE = 0.04
 CACHE_MISS_PRICE = 2.0
 OUTPUT_PRICE = 8.0
+
+# 单次答题记录与批次汇总共用的数值字段。
 TOTAL_FIELDS = (
     "elapsed_seconds", "input_tokens", "cache_hit_tokens", "cache_miss_tokens",
     "output_tokens", "total_tokens", "cost_cny",
@@ -54,6 +56,7 @@ def record_cost(cost_path, question_id):
             _save_cost_record(cost_path, cost, record, callback.usage_metadata)
 
 
+# 用接口回执计算本次费用，将答题记录和累计值一起保存。
 def _save_cost_record(cost_path, cost, record, usage_metadata):
     # 每次答题使用同一模型。回调汇总该模型返回的用量，包括纠正请求。
     if usage_metadata:
@@ -80,6 +83,7 @@ def _save_cost_record(cost_path, cost, record, usage_metadata):
         # 整次答题都没有收到用量时，将费用记为未知。
         cost["total"]["unknown_usage_count"] += 1
 
+    # 保留每次尝试，累计时只加本次有记录的数值。
     cost["records"].append(record)
     total = cost["total"]
     for field in TOTAL_FIELDS:

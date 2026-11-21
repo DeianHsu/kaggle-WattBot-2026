@@ -16,6 +16,8 @@ from wattbot_simple.retrieve import (
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
+
+# 提交文件的列名和顺序，写入结果和检查续跑文件时共用。
 COLUMNS = (
     "id", "question", "answer", "answer_value", "answer_unit",
     "ref_id", "ref_url", "supporting_materials", "explanation",
@@ -61,6 +63,7 @@ def predict_question(question, retriever, llm, paper_urls):
     }
 
 
+# 读取预测所需的题库和输出路径，以及可选题号和思考强度。
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("questions", type=Path)
@@ -97,6 +100,7 @@ def read_completed_ids(output_path):
 
 # 默认按题库顺序处理。指定 --ids 时按传入的题号顺序处理。
 def predict(questions_path, output_path, ids=None, chroma_store=None, thinking="none"):
+    # 确定本次题目顺序，供后续核对已完成的题号。
     with questions_path.open(encoding="utf-8-sig", newline="") as file:
         questions = list(csv.DictReader(file))
     if ids:
@@ -161,5 +165,6 @@ def main():
     predict(args.questions, args.output, ids=args.ids, thinking=args.thinking)
 
 
+# 支持通过 python -m wattbot_simple.predict 使用已有索引答题。
 if __name__ == "__main__":
     main()

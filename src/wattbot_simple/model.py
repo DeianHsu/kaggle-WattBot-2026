@@ -9,6 +9,8 @@ from langchain_core.messages.content import create_image_block, create_text_bloc
 from langchain_openai import ChatOpenAI
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
+
+# 要求视觉模型依据图中可见内容生成英文检索描述。
 VISUAL_DESCRIPTION_PROMPT = (
     "Describe this figure or table in one short English paragraph for search. "
     "Include the subject, visible labels and units, and any legend entries, "
@@ -16,6 +18,7 @@ VISUAL_DESCRIPTION_PROMPT = (
 )
 
 
+# 读取项目配置，每次调用都按指定思考强度创建新的 DeepSeek 客户端。
 def create_llm(thinking="none"):
     load_dotenv(ROOT_DIR / ".env")
     # 开启思考时沿用接口默认输出上限，为推理留出空间。
@@ -36,6 +39,7 @@ def create_llm(thinking="none"):
     )
 
 
+# 将内嵌图片或解析产物中的图片文件转成模型可读取的图片块。
 def load_image_block(image, document_dir):
     uri = str(image.uri)
     if uri.startswith("data:"):
@@ -47,6 +51,7 @@ def load_image_block(image, document_dir):
     )
 
 
+# 发送原图和描述要求，提取供建库检索使用的文字。
 def describe_image(vlm, image_block):
     message = HumanMessage(content_blocks=[
         create_text_block(VISUAL_DESCRIPTION_PROMPT),
