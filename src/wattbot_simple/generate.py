@@ -4,11 +4,13 @@
 import json
 import logging
 from pathlib import Path
+
 from docling_core.types import DoclingDocument
 from docling_core.types.doc import RefItem
 from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.messages.content import create_text_block
+
 from wattbot_simple.model import load_image_block
 from wattbot_simple.retrieve import retrieve_queries
 
@@ -29,23 +31,25 @@ SYSTEM_PROMPT = (
 
 
 def retrieve_evidence(question, retriever, llm, answer_unit=""):
+    messages = [
+        SystemMessage(content=SEARCH_PROMPT),
+        HumanMessage(content=f"{question}\n指定单位：{answer_unit}"),
+    ]
+    queries = [question]
     try:
-        plan = llm.invoke([
-            SystemMessage(content=SEARCH_PROMPT),
-            HumanMessage(content=f"{question}\n指定单位：{answer_unit}"),
-        ])
+        plan = llm.invoke(messages)
     except OutputParserException:
         logger.warning("检索规划无法解析，使用原问题检索")
-        plan = {}
+    else:
+        subqueries = plan.get("queries") if isinstance(plan, dict) else None
+        if isinstance(subqueries, list) and all(
+            isinstance(query, str) for query in subqueries
+        ):
+            queries.extend(query.strip() for query in subqueries if query.strip())
+        else:
+            logger.warning("检索规划缺少有效的 queries 列表，使用原问题检索")
 
-    subqueries = plan.get("queries", []) if isinstance(plan, dict) else []
-    if not isinstance(subqueries, list) or any(
-        not isinstance(query, str) for query in subqueries
-    ):
-        logger.warning("忽略格式异常的检索字段 queries")
-        subqueries = []
-    subqueries = [query.strip() for query in subqueries if query.strip()]
-    queries = list(dict.fromkeys([question, *subqueries]))
+    queries = list(dict.fromkeys(queries))
     return retrieve_queries(retriever, queries)
 
 
@@ -110,17 +114,13 @@ def generate_answer(question, retriever, llm):
     llm = llm.with_structured_output(method="json_mode")
     evidence = retrieve_evidence(question, retriever, llm)
     evidence_blocks, citation_map = build_evidence_blocks(evidence)
-
+    question_block = create_text_block(f"question:{question}")
     messages = [
         SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(
-            content_blocks=[
-                create_text_block(f"question:{question}"),
-                *evidence_blocks,
-            ]
-        )
+        HumanMessage(content_blocks=[question_block, *evidence_blocks]),
     ]
     llm_answer = llm.invoke(messages)
+
     # 去除重复引用标签，并恢复每条引用的论文来源和页码。
     references = [
         {
