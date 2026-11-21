@@ -1,4 +1,4 @@
-# 规划论文检索查询，将文本、表格和原图组装成带标签的证据。
+# 将检索到的文本、表格和原图组装成带标签的证据。
 # 根据证据生成并校验答案，记录标签对应的论文来源、页码和文本块标识。
 
 import json
@@ -11,20 +11,6 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.messages.content import create_text_block
 
 from wattbot_simple.model import load_image_block
-from wattbot_simple.retrieve import retrieve_queries
-
-
-SEARCH_PROMPT = """Plan short English queries to search research papers.
-The original question will be searched separately.
-For comparison, calculation, and cross-paper questions, write one query for
-each independent fact needed to answer. Name the subject and metric in each.
-Keep each fact's year, units, scope, and conditions. Retain the question's
-terms and add a common English variant when useful.
-Return only search phrases. Do not guess answers, values, or papers that
-were not given. Return an empty list if the question clearly asks for a
-single fact.
-Return JSON in this format.
-{"queries": ["short search phrase"]}"""
 
 
 # 规定正式作答的答案字段、数值格式和证据不足时的填写方式。
@@ -60,26 +46,6 @@ Example JSON
   "explanation": "The cited sentence gives the sample count."
 }
 """
-
-
-def retrieve_evidence(question, retriever, llm, answer_unit=""):
-    messages = [
-        SystemMessage(content=SEARCH_PROMPT),
-        HumanMessage(content=f"{question}\nRequested unit: {answer_unit}"),
-    ]
-    queries = [question]
-    try:
-        plan = llm.invoke(messages)
-    except OutputParserException:
-        return retrieve_queries(retriever, queries)
-
-    subqueries = plan.get("queries") if isinstance(plan, dict) else None
-    if isinstance(subqueries, list) and all(
-        isinstance(query, str) for query in subqueries
-    ):
-        queries.extend(query.strip() for query in subqueries if query.strip())
-    queries = list(dict.fromkeys(queries))
-    return retrieve_queries(retriever, queries)
 
 
 # 将检索结果组装成图文消息，并建立证据标签到原始来源的映射。
@@ -140,9 +106,8 @@ def build_evidence_blocks(evidence):
     return evidence_blocks, citation_map
 
 
-# 为一道题检索证据并生成答案，返回校验后的答案及证据标签的映射。
-def generate_answer(question, retriever, llm, answer_unit):
-    evidence = retrieve_evidence(question, retriever, llm, answer_unit=answer_unit)
+# 根据已有证据生成答案，返回校验后的答案及证据标签的映射。
+def generate_answer(question, evidence, llm, answer_unit):
     evidence_blocks, citation_map = build_evidence_blocks(evidence)
     question_block = create_text_block(
         f"Question: {question}\n"

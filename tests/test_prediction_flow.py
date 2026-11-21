@@ -14,7 +14,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.output_parsers import JsonOutputParser
 
 from wattbot_simple import predict
-from wattbot_simple.generate import retrieve_evidence
+from wattbot_simple.retrieve import retrieve_evidence
 
 
 def _response(content):

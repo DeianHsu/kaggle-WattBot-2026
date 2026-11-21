@@ -9,7 +9,10 @@ from wattbot_simple.cost import record_cost
 from wattbot_simple.generate import generate_answer
 from wattbot_simple.index import open_chroma_store
 from wattbot_simple.model import create_llm
-from wattbot_simple.retrieve import create_evidence_retriever
+from wattbot_simple.retrieve import (
+    create_evidence_retriever,
+    retrieve_evidence,
+)
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -18,11 +21,15 @@ COLUMNS = (
     "ref_id", "ref_url", "supporting_materials", "explanation",
 )
 
-# 将一道题的答案和引用整理成提交文件的一行。
+# 先检索证据再生成答案，将答案和引用整理为提交文件的一行。
 def predict_question(question, retriever, llm, paper_urls):
+    question_text = question["question"]
+    answer_unit = question["answer_unit"]
+    evidence = retrieve_evidence(
+        question_text, retriever, llm, answer_unit=answer_unit,
+    )
     result, citation_map = generate_answer(
-        question["question"], retriever, llm,
-        answer_unit=question["answer_unit"],
+        question_text, evidence, llm, answer_unit=answer_unit,
     )
     answer = result["answer"]
     value = result["answer_value"]
@@ -43,10 +50,10 @@ def predict_question(question, retriever, llm, paper_urls):
     # 按提交列组织结果，题号、问题和单位直接沿用输入。
     return {
         "id": question["id"],
-        "question": question["question"],
+        "question": question_text,
         "answer": answer,
         "answer_value": value,
-        "answer_unit": question["answer_unit"],
+        "answer_unit": answer_unit,
         "ref_id": ref_id,
         "ref_url": ref_url,
         "supporting_materials": supporting_materials,

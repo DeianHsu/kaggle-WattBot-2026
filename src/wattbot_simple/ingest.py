@@ -43,7 +43,10 @@ def create_converter_and_chunker():
 
 
 # 将解析文档转成检索块，并保留来源、原始元素和解析文件位置。
-def chunk_pdf_document(pdf_path, pdf_document, document_path, chunker, parsed_pages, vlm):
+def chunk_pdf_document(
+    pdf_path, pdf_document, document_path, chunker, parsed_pages,
+    visual_descriptions,
+):
     # 由分块器处理正文和表格，保留后续回查原文所需的元素标识。
     docling_chunks = list(chunker.chunk(pdf_document))
 
@@ -88,12 +91,10 @@ def chunk_pdf_document(pdf_path, pdf_document, document_path, chunker, parsed_pa
         )
 
     # 每条描述只引用一张原图或表格截图，命中时沿用该元素的原图和页码。
-    for item in [*pdf_document.pictures, *pdf_document.tables]:
-        image_block = load_image_block(item.image, document_path.parent)
-        description = describe_image(vlm, image_block)
-        if not description:
-            raise ValueError(f"{pdf_path.name} 的图表 {item.self_ref} 未生成描述")
-        docling_chunks.append(DocChunk(text=description, meta=DocMeta(doc_items=[item])))
+    docling_chunks.extend(
+        DocChunk(text=description, meta=DocMeta(doc_items=[item]))
+        for item, description in visual_descriptions
+    )
 
     # 过滤没有文字的块，再转换成检索和建库使用的文档对象。
     chunks = [
@@ -147,6 +148,21 @@ def ingest_pdf(pdf_path, converter, chunker, vlm):
         image_mode=ImageRefMode.REFERENCED,
     )
 
-    # 使用刚解析的文档生成检索块，避免重复解析 PDF。
-    chunks = chunk_pdf_document(pdf_path, pdf_document, document_path, chunker, parsed_pages, vlm)
-    return chunks
+    # 使用保存好的图表生成检索描述，并保留描述与原始元素的对应关系。
+    def describe_visual_items():
+        descriptions = []
+        for item in [*pdf_document.pictures, *pdf_document.tables]:
+            image_block = load_image_block(item.image, output_dir)
+            description = describe_image(vlm, image_block)
+            if not description:
+                raise ValueError(
+                    f"{pdf_path.name} 的图表 {item.self_ref} 未生成描述"
+                )
+            descriptions.append((item, description))
+        return descriptions
+
+    visual_descriptions = describe_visual_items()
+    return chunk_pdf_document(
+        pdf_path, pdf_document, document_path, chunker, parsed_pages,
+        visual_descriptions,
+    )

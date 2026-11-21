@@ -1,4 +1,4 @@
-# 组合向量检索和 BM25 关键词检索，再用交叉编码器重排候选证据。
+# 为多事实题规划查询，组合向量和 BM25 关键词检索，再重排并汇总证据。
 
 import re
 from itertools import zip_longest
@@ -7,9 +7,24 @@ from langchain_classic.retrievers.document_compressors import CrossEncoderRerank
 from langchain_community.cross_encoders import HuggingFaceCrossEncoder
 from langchain_classic.retrievers import EnsembleRetriever, ContextualCompressionRetriever
 from langchain_community.retrievers import BM25Retriever
+from langchain_core.exceptions import OutputParserException
+from langchain_core.messages import HumanMessage, SystemMessage
 
 
 EVIDENCE_LIMIT = 20
+
+
+SEARCH_PROMPT = """Plan short English queries to search research papers.
+The original question will be searched separately.
+For comparison, calculation, and cross-paper questions, write one query for
+each independent fact needed to answer. Name the subject and metric in each.
+Keep each fact's year, units, scope, and conditions. Retain the question's
+terms and add a common English variant when useful.
+Return only search phrases. Do not guess answers, values, or papers that
+were not given. Return an empty list if the question clearly asks for a
+single fact.
+Return JSON in this format.
+{"queries": ["short search phrase"]}"""
 
 
 def create_hybrid_retriever(chroma_store):
@@ -51,6 +66,26 @@ def create_evidence_retriever(chroma_store):
         base_compressor=reranker,
     )
     return evidence_retriever
+
+
+def retrieve_evidence(question, retriever, llm, answer_unit=""):
+    messages = [
+        SystemMessage(content=SEARCH_PROMPT),
+        HumanMessage(content=f"{question}\nRequested unit: {answer_unit}"),
+    ]
+    queries = [question]
+    try:
+        plan = llm.invoke(messages)
+    except OutputParserException:
+        return retrieve_queries(retriever, queries)
+
+    subqueries = plan.get("queries") if isinstance(plan, dict) else None
+    if isinstance(subqueries, list) and all(
+        isinstance(query, str) for query in subqueries
+    ):
+        queries.extend(query.strip() for query in subqueries if query.strip())
+    queries = list(dict.fromkeys(queries))
+    return retrieve_queries(retriever, queries)
 
 
 def retrieve_queries(retriever, queries):
