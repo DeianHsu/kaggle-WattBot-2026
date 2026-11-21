@@ -53,11 +53,11 @@ def create_evidence_retriever(chroma_store):
     return evidence_retriever
 
 
-def retrieve_queries(retriever, queries, previous=()):
+def retrieve_queries(retriever, queries):
     results = [retriever.invoke(query) for query in queries]
     # 按查询轮流取证据，给排名靠前的不同事实各留位置。
     evidence = {}
-    for group in zip_longest(previous, *results):
+    for group in zip_longest(*results):
         for chunk in group:
             if chunk is not None:
                 evidence.setdefault(chunk.metadata["chunk_id"], chunk)
