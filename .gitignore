@@ -1,5 +1,6 @@
 .venv/
 .env
+/AGENTS.md
 papers/
 /input/
 __pycache__/
