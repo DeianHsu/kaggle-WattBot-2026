@@ -60,7 +60,7 @@ Python 3.14 或更高版本。首次安装依赖：
 uv sync --locked
 ```
 
-当前本地环境使用 `torch==2.15.0+cu132` 和 `torchvision==0.29.2+cu132`。重新同步依赖可能替换这两个 CUDA 构建。
+锁文件为 Windows x64 固定了 CUDA 13.2 构建 `torch==2.15.0+cu132` 和 `torchvision==0.29.2+cu132`。非 Windows 平台从 PyPI 安装 PyTorch 和 TorchVision。
 
 项目根目录的 `.env` 配置：
 
