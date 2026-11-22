@@ -2,7 +2,6 @@
 .env
 papers/
 /input/
-/reports/
 __pycache__/
 
 *.pyc
@@ -13,3 +12,15 @@ submission*.csv
 submission*.json
 *_cost.json
 *_cost.json.tmp
+
+# 本次评测资料
+/reports/**
+!/reports/验证集评测/
+!/reports/验证集评测/验证集评测报告.md
+!/reports/验证集评测/submission.csv
+!/reports/验证集评测/score.txt
+!/reports/验证集评测/submission_cost.json
+!/reports/测试集提交/
+!/reports/测试集提交/测试集提交报告.md
+!/reports/测试集提交/submission.csv
+!/reports/测试集提交/submission_cost.json

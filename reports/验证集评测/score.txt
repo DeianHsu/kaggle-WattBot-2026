@@ -1,0 +1,46 @@
+D:\Study\Pycharm\Projects\WattBot_Simple\input\Score.py:472: Pandas4Warning: The 'lsuffix' and 'rsuffix' keywords in DataFrame.join are deprecated and will be removed in a future version. Use the 'suffixes' keyword instead.
+  merged = sol.join(sub[payload_cols], lsuffix="_sol", rsuffix="_sub", how="inner")
+Component scores (means):
+  value match  : 0.865
+  unit match   : 1.000
+  ref overlap  : 0.900  (Jaccard; scored component uses F1)
+  ref precision: 0.908
+  ref recall   : 0.944
+  ref F1       : 0.916
+  NA agreement : 0.996
+  false answers: 0.200  (share of the 5 unanswerable questions given an answer anyway)
+OVERALL SCORE  : 0.882  (ref component = f1)
+
+Error rate by evidence type (multi-label from SOLUTION; buckets overlap):
+  type            wrong   % wrong   score
+  Quote         25/194     12.9%   0.888
+  Table          2/38       5.3%   0.959
+  Figure         2/17      11.8%   0.912
+  Math           6/25      24.0%   0.801
+  is_NA          1/5       20.0%   0.800
+  CrossPaper     4/19      21.1%   0.802
+  Reconcile      1/11       9.1%   0.905
+  ALL           33/245     13.5%   0.882
+
+Examples of mismatches (expected vs. got):
+- id=q009
+  expected: value=[116.9,121.7] | unit=household-years | ref=['jegham2025', 'patterson2021']
+  got     : value=is_blank | unit=household-years | ref=['is_blank']
+  why     : value type mismatch: expected numeric in range, got 'is_blank'
+  why     : ref partial/none: expected ['jegham2025', 'patterson2021'], got ['is_blank']
+- id=q016
+  expected: value=2 | unit=scope | ref=['amazon2023', 'li2025b', 'talukder2026']
+  got     : value=Scope 2 | unit=scope | ref=['guidi2026', 'li2025b', 'talukder2026']
+  why     : ref partial/none: expected ['amazon2023', 'li2025b', 'talukder2026'], got ['guidi2026', 'li2025b', 'talukder2026']
+- id=q025
+  expected: value=30 | unit=percent | ref=['luccioni2025a']
+  got     : value=30 | unit=percent | ref=['luccioni2025a', 'wu2021b']
+  why     : ref partial/none: expected ['luccioni2025a'], got ['luccioni2025a', 'wu2021b']
+- id=q052
+  expected: value=2.9 | unit=kWh | ref=['luccioni2024']
+  got     : value=2.907 | unit=kWh | ref=['luccioni2024']
+- id=q056
+  expected: value=1 | unit=is_blank | ref=['mlperfpower2024', 'tokenpowerbench2025']
+  got     : value=1 | unit=is_blank | ref=['ebert2024', 'mlperfpower2024']
+  why     : ref partial/none: expected ['mlperfpower2024', 'tokenpowerbench2025'], got ['ebert2024', 'mlperfpower2024']
+0.8820408163265306
