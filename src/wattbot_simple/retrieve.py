@@ -23,8 +23,9 @@ each independent fact needed to answer. Name the subject and metric in each.
 Keep each fact's year, units, scope, and conditions. Retain the question's
 terms and add a common English variant when useful.
 Return only search phrases. Do not guess answers, values, or papers that
-were not given. Return an empty list if the question clearly asks for a
-single fact.
+were not given. Return an empty list only if the question is already in
+English and clearly asks for a single fact. If the question is not in
+English, always return at least one English search phrase.
 Return JSON in this format.
 {"queries": ["short search phrase"]}"""
 
@@ -53,16 +54,22 @@ def create_hybrid_retriever(chroma_store):
     )
 
 
-# 创建检索器，在收到问题后执行召回和重排。
-def create_evidence_retriever(chroma_store):
-    hybrid_retriever = create_hybrid_retriever(chroma_store)
+# 创建重排器，供服务热刷新混合检索索引时复用模型实例。
+def create_reranker():
     rerank_model = HuggingFaceCrossEncoder(
         model_name="BAAI/bge-reranker-base",
     )
-    reranker = CrossEncoderReranker(
+    return CrossEncoderReranker(
         model=rerank_model,
         top_n=EVIDENCE_LIMIT,
     )
+
+
+# 创建检索器，在收到问题后执行召回和重排。
+def create_evidence_retriever(chroma_store, reranker=None):
+    hybrid_retriever = create_hybrid_retriever(chroma_store)
+    if reranker is None:
+        reranker = create_reranker()
 
     evidence_retriever = ContextualCompressionRetriever(
         base_retriever=hybrid_retriever,

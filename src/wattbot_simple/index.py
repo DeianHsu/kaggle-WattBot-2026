@@ -27,9 +27,50 @@ def open_chroma_store():
     return chroma_store
 
 
+# 解析单篇未入库的论文并写入索引，已存在时跳过并返回 0。
+def index_pdf(pdf_path, chroma_store, *, converter=None, chunker=None, vlm=None):
+    from wattbot_simple.ingest import create_converter_and_chunker, ingest_pdf
+
+    pdf_path = Path(pdf_path)
+    pdf_stem = pdf_path.stem
+
+    # 按论文文件名判断是否已入库，避免重复添加检索块。
+    existing_ids = chroma_store.get(
+        where={"pdf_stem": pdf_stem},
+        limit=1,
+        include=[],
+    )["ids"]
+    if existing_ids:
+        return 0
+
+    if vlm is None:
+        vlm = create_llm()
+    if converter is None or chunker is None:
+        converter, chunker = create_converter_and_chunker()
+
+    chunks = ingest_pdf(pdf_path, converter, chunker, vlm)
+    if not chunks:
+        raise ValueError(f"{pdf_path.name} 未生成可用的检索块")
+
+    # 分配检索块标识，并将原始元素信息转成索引可保存的字符串。
+    for chunk_no, chunk in enumerate(chunks):
+        chunk_id = f"{pdf_stem}_{chunk_no}"
+        chunk.metadata.update(
+            chunk_id=chunk_id,
+            pdf_stem=pdf_stem,
+            dl_meta=json.dumps(chunk.metadata["dl_meta"], ensure_ascii=False),
+        )
+
+    chroma_store.add_documents(
+        documents=chunks,
+        ids=[chunk.metadata["chunk_id"] for chunk in chunks],
+    )
+    return len(chunks)
+
+
 # 解析未入库的论文，将正文和图表的检索文本一并写入索引。
 def build_chroma_index(papers_dir):
-    from wattbot_simple.ingest import create_converter_and_chunker, ingest_pdf
+    from wattbot_simple.ingest import create_converter_and_chunker
 
     pdf_paths = sorted(papers_dir.glob("*.pdf"))
     if not pdf_paths:
@@ -40,7 +81,7 @@ def build_chroma_index(papers_dir):
     for paper_no, pdf_path in enumerate(pdf_paths, start=1):
         pdf_stem = pdf_path.stem
 
-        # 按论文文件名判断是否已入库，避免重复添加检索块。
+        # 先检查是否已入库，避免无需建库时初始化解析器和视觉模型。
         existing_ids = chroma_store.get(
             where={"pdf_stem": pdf_stem},
             limit=1,
@@ -55,22 +96,12 @@ def build_chroma_index(papers_dir):
             vlm = create_llm()
             converter, chunker = create_converter_and_chunker()
 
-        chunks = ingest_pdf(pdf_path, converter, chunker, vlm)
-        if not chunks:
-            raise ValueError(f"{pdf_path.name} 未生成可用的检索块")
-
-        # 分配检索块标识，并将原始元素信息转成索引可保存的字符串。
-        for chunk_no, chunk in enumerate(chunks):
-            chunk_id = f"{pdf_stem}_{chunk_no}"
-            chunk.metadata.update(
-                chunk_id=chunk_id,
-                pdf_stem=pdf_stem,
-                dl_meta=json.dumps(chunk.metadata["dl_meta"], ensure_ascii=False),
-            )
-
-        chroma_store.add_documents(
-            documents=chunks,
-            ids=[chunk.metadata["chunk_id"] for chunk in chunks],
+        index_pdf(
+            pdf_path,
+            chroma_store,
+            converter=converter,
+            chunker=chunker,
+            vlm=vlm,
         )
         print(f"[{paper_no}/{len(pdf_paths)}] 已完成 {pdf_path.name}", flush=True)
 

@@ -1,6 +1,7 @@
 # 将检索到的文本、表格和原图组装成带标签的证据。
 # 根据证据生成并校验答案，记录标签对应的论文来源、页码和文本块标识。
 
+from functools import lru_cache
 import json
 from pathlib import Path
 
@@ -48,7 +49,22 @@ Example JSON
 """
 
 
-# 将检索结果组装成图文消息，并建立证据标签到原始来源的映射。
+# 缓存已反序列化的 Docling 解析文档，减少同一篇论文图表命中时的磁盘开销。
+@lru_cache(maxsize=64)
+def _load_docling_document(document_path_str: str) -> DoclingDocument:
+    return DoclingDocument.load_from_json(Path(document_path_str))
+
+
+# 根据接口模式选择英文评测提示词或跟随提问语言作答的提示词。
+def _build_answer_prompt(*, follow_question_language: bool) -> str:
+    if not follow_question_language:
+        return ANSWER_PROMPT
+    return ANSWER_PROMPT.replace(
+        "Write answer and explanation in English.",
+        "Write answer and explanation in the same language as the question "
+        "(for example, answer in Simplified Chinese if the question is in Chinese).",
+        1,
+    )
 def build_evidence_blocks(evidence):
     evidence_blocks = []
     citation_map = {}
@@ -88,7 +104,7 @@ def build_evidence_blocks(evidence):
 
         # 按原始元素标识取回完整图表，补充检索文字没有包含的内容。
         document_path = Path(metadata["document_path"])
-        pdf_document = DoclingDocument.load_from_json(document_path)
+        pdf_document = _load_docling_document(str(document_path))
         for item in visual_items:
             element = RefItem(cref=item["self_ref"]).resolve(pdf_document)
             if item["label"] == "table":
@@ -107,14 +123,19 @@ def build_evidence_blocks(evidence):
 
 
 # 根据已有证据生成答案，返回校验后的答案及证据标签的映射。
-def generate_answer(question, evidence, llm, answer_unit):
+def generate_answer(
+    question, evidence, llm, answer_unit, *, follow_question_language=False
+):
     evidence_blocks, citation_map = build_evidence_blocks(evidence)
     question_block = create_text_block(
         f"Question: {question}\n"
         f"Requested unit: {answer_unit}"
     )
+    answer_prompt = _build_answer_prompt(
+        follow_question_language=follow_question_language,
+    )
     messages = [
-        SystemMessage(content=ANSWER_PROMPT),
+        SystemMessage(content=answer_prompt),
         HumanMessage(content_blocks=[question_block, *evidence_blocks]),
     ]
     # 解析或校验输出失败时，把错误反馈给模型，最多纠正一次。
